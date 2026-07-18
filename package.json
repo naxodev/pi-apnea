@@ -4,11 +4,12 @@
   "private": true,
   "description": "Multi-role Pi + Herdr workflow: file-backed handoffs, no hidden subagents",
   "license": "MIT",
+  "type": "module",
   "keywords": ["pi-package", "pi", "herdr", "apnea", "workflow"],
   "pi": {
     "skills": ["./skills"],
     "prompts": ["./prompts"],
-    "extensions": []
+    "extensions": ["./extension"]
   },
   "files": [
     "CONTEXT.md",
@@ -18,6 +19,16 @@
     "schemas",
     "skills",
     "prompts",
-    "examples"
-  ]
+    "examples",
+    "extension"
+  ],
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.10",
+    "@types/node": "^26.1.1",
+    "bun-types": "^1.3.14",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "typebox": "^1.3.6"
+  }
 }

@@ -4,7 +4,7 @@ Multi-role development workflow for [Pi](https://github.com/earendil-works/pi) i
 
 File-backed handoffs. Real terminals. No hidden subagents.
 
-> **Status:** paper protocol. Extension tools are intentionally not implemented until the manual gate in [`docs/protocol/manual-gate.md`](docs/protocol/manual-gate.md) passes.
+> **Status:** paper protocol **passed** (`examples/toy/GATE-RESULTS.md`). Extension tools are implemented under `extension/`. Install/link the package, then drive runs with an orchestrator Pi inside Herdr.
 
 ## What it is
 
@@ -29,13 +29,30 @@ Roles can be different harnesses (Pi, Claude, Codex, …) via **global profiles*
 | [`docs/adr/`](docs/adr/) | Decisions |
 | [`briefs/`](briefs/) | Role briefs |
 
-## Install (later)
+## Install
 
 ```bash
+# local path while developing
+pi install /Users/nachovazquez/work/1-projects/naxodev/pi-apnea
+
+# or later
 pi install git:github.com/<you>/pi-apnea
 ```
 
-v1 also targets npm as `@naxodev/apnea` once the package is real.
+Requires `~/.config/apnea/config.json` profiles (see `docs/protocol/config.md` or `/apnea-init`).
+
+### Tools
+
+| Tool | Purpose |
+|------|---------|
+| `workflow_start` | start / resume / abandon |
+| `dispatch_role` | task file + Herdr launch |
+| `workflow_wait` | artifact front-matter |
+| `workflow_commit_phase` | APPROVED + verify + jj/git |
+| `workflow_status` | read-only |
+| `workflow_reset_rounds` | **human only** |
+
+Orchestrator allowlist: all of the above **except** `workflow_reset_rounds`, plus `read`.
 
 ## Setup (planned)
 

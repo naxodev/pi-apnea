@@ -1,0 +1,181 @@
+/**
+ * @naxodev/apnea — Pi extension tools for Herdr multi-role workflow.
+ */
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import { toolContent } from "./lib/result.ts";
+import { workflowCommitPhase } from "./tools/commit.ts";
+import { workflowDispatch } from "./tools/dispatch.ts";
+import { workflowStart } from "./tools/start.ts";
+import { workflowResetRounds, workflowStatus } from "./tools/status.ts";
+import { workflowWait } from "./tools/wait.ts";
+
+const DispatchKind = Type.Union([
+	Type.Literal("plan"),
+	Type.Literal("plan_review"),
+	Type.Literal("phase_package"),
+	Type.Literal("code"),
+	Type.Literal("code_review"),
+	Type.Literal("pr_description"),
+]);
+
+export default function (pi: ExtensionAPI) {
+	pi.registerTool({
+		name: "workflow_start",
+		label: "Apnea start",
+		description:
+			"Start, resume, or abandon an Apnea run. Start refuses if state exists or tree dirty (unless allow_dirty). Resume never auto-dispatches.",
+		parameters: Type.Object({
+			goal: Type.Optional(
+				Type.String({ description: "Run goal (required for action=start)" }),
+			),
+			slug: Type.Optional(Type.String({ description: "Run slug for branch/bookmark" })),
+			allow_dirty: Type.Optional(Type.Boolean()),
+			action: Type.Optional(
+				Type.Union([
+					Type.Literal("start"),
+					Type.Literal("resume"),
+					Type.Literal("abandon"),
+				]),
+			),
+		}),
+		async execute(
+			_id: string,
+			params: {
+				goal?: string;
+				slug?: string;
+				allow_dirty?: boolean;
+				action?: "start" | "resume" | "abandon";
+			},
+		) {
+			const action = params.action ?? "start";
+			if (action === "start" && !params.goal?.trim()) {
+				return toolContent({
+					ok: false,
+					error: "goal is required when action=start",
+				});
+			}
+			return toolContent(
+				workflowStart({
+					goal: params.goal ?? "",
+					slug: params.slug,
+					allow_dirty: params.allow_dirty,
+					action,
+				}),
+			);
+		},
+	});
+
+	pi.registerTool({
+		name: "dispatch_role",
+		label: "Apnea dispatch",
+		description:
+			"Write task file, clear target artifact path, launch role in Herdr pane (oneshot stdin or interactive prompt). Set rework=true only after CHANGES_REQUIRED.",
+		parameters: Type.Object({
+			kind: DispatchKind,
+			task_markdown: Type.Optional(
+				Type.String({ description: "Extra task body details" }),
+			),
+			rework: Type.Optional(
+				Type.Boolean({
+					description: "Increment round after CHANGES_REQUIRED",
+				}),
+			),
+		}),
+		async execute(
+			_id: string,
+			params: {
+				kind:
+					| "plan"
+					| "plan_review"
+					| "phase_package"
+					| "code"
+					| "code_review"
+					| "pr_description";
+				task_markdown?: string;
+				rework?: boolean;
+			},
+		) {
+			return toolContent(
+				workflowDispatch({
+					kind: params.kind,
+					task_markdown: params.task_markdown,
+					rework: params.rework,
+				}),
+			);
+		},
+	});
+
+	pi.registerTool({
+		name: "workflow_wait",
+		label: "Apnea wait",
+		description:
+			"Wait for pending artifact front-matter. Agent-status is liveness only. Advances state machine on success.",
+		parameters: Type.Object({
+			timeout_ms: Type.Optional(Type.Number()),
+			poll_ms: Type.Optional(Type.Number()),
+		}),
+		async execute(
+			_id: string,
+			params: { timeout_ms?: number; poll_ms?: number },
+		) {
+			return toolContent(
+				workflowWait({
+					timeout_ms: params.timeout_ms,
+					poll_ms: params.poll_ms,
+				}),
+			);
+		},
+	});
+
+	pi.registerTool({
+		name: "workflow_commit_phase",
+		label: "Apnea commit",
+		description:
+			"Require APPROVED code review, run phase package verify commands, jj/git commit, advance phase. Refuses otherwise.",
+		parameters: Type.Object({
+			message: Type.Optional(Type.String()),
+			no_remaining_phases: Type.Optional(
+				Type.Boolean({
+					description: "If true, go to finishing (PR description) after commit",
+				}),
+			),
+		}),
+		async execute(
+			_id: string,
+			params: { message?: string; no_remaining_phases?: boolean },
+		) {
+			return toolContent(
+				workflowCommitPhase({
+					message: params.message,
+					no_remaining_phases: params.no_remaining_phases,
+				}),
+			);
+		},
+	});
+
+	pi.registerTool({
+		name: "workflow_status",
+		label: "Apnea status",
+		description: "Read-only snapshot of run state and legal tools. Never mutates.",
+		parameters: Type.Object({}),
+		async execute() {
+			return toolContent(workflowStatus());
+		},
+	});
+
+	pi.registerTool({
+		name: "workflow_reset_rounds",
+		label: "Apnea reset rounds",
+		description:
+			"HUMAN ONLY. Reset rework counter for a gate key (e.g. plan_review or phase-01/code_review). Orchestrator must not call this.",
+		parameters: Type.Object({
+			gate: Type.String({
+				description: "Round key, e.g. plan_review or phase-01/code_review",
+			}),
+		}),
+		async execute(_id: string, params: { gate: string }) {
+			return toolContent(workflowResetRounds({ gate: params.gate }));
+		},
+	});
+}
