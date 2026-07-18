@@ -114,7 +114,9 @@ export function workflowDispatch(params: {
 			(params.kind === "code_review" && state.step === "code_review");
 		// After CHANGES_REQUIRED, step moves back to planning/coding; rework dispatch is plan/code with rework=true
 		if (!okRework && !(params.kind === "plan" || params.kind === "code")) {
-			return err("rework=true only valid for plan/code (after CHANGES_REQUIRED) or same-gate re-review");
+			return err(
+				"rework=true only valid for plan/code (after CHANGES_REQUIRED) or same-gate re-review",
+			);
 		}
 	}
 
@@ -157,7 +159,10 @@ export function workflowDispatch(params: {
 			? roundKey(0, "plan_review")
 			: codeReviewRoundKey(state.phase_index);
 	if (
-		(params.kind === "plan" || params.kind === "code" || params.kind === "plan_review" || params.kind === "code_review") &&
+		(params.kind === "plan" ||
+			params.kind === "code" ||
+			params.kind === "plan_review" ||
+			params.kind === "code_review") &&
 		getRound(state, capKey) > cfg.review_round_cap
 	) {
 		return err(
@@ -195,7 +200,10 @@ export function workflowDispatch(params: {
 			artifactAbs = path.join(d, "coder-result.md");
 			const pkg =
 				state.current_phase_package ??
-				rel(path.join(phaseDir(state.phase_index, 1, root), "phase-package.md"), root);
+				rel(
+					path.join(phaseDir(state.phase_index, 1, root), "phase-package.md"),
+					root,
+				);
 			extra =
 				extra ||
 				`Implement phase package \`${pkg}\` only.\nOn rework, read latest code-review and fix.`;
@@ -206,7 +214,10 @@ export function workflowDispatch(params: {
 			artifactAbs = path.join(d, "code-review.md");
 			const pkg =
 				state.current_phase_package ??
-				rel(path.join(phaseDir(state.phase_index, 1, root), "phase-package.md"), root);
+				rel(
+					path.join(phaseDir(state.phase_index, 1, root), "phase-package.md"),
+					root,
+				);
 			const coder = rel(path.join(d, "coder-result.md"), root);
 			extra =
 				extra ||

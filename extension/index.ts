@@ -3,6 +3,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { registerApneaCommands } from "./commands.ts";
 import { toolContent } from "./lib/result.ts";
 import { workflowCommitPhase } from "./tools/commit.ts";
 import { workflowDispatch } from "./tools/dispatch.ts";
@@ -20,6 +21,9 @@ const DispatchKind = Type.Union([
 ]);
 
 export default function (pi: ExtensionAPI) {
+	// `/apnea …` for humans (autocomplete); tools remain for the model
+	registerApneaCommands(pi);
+
 	pi.registerTool({
 		name: "workflow_start",
 		label: "Apnea start",
@@ -29,7 +33,9 @@ export default function (pi: ExtensionAPI) {
 			goal: Type.Optional(
 				Type.String({ description: "Run goal (required for action=start)" }),
 			),
-			slug: Type.Optional(Type.String({ description: "Run slug for branch/bookmark" })),
+			slug: Type.Optional(
+				Type.String({ description: "Run slug for branch/bookmark" }),
+			),
 			allow_dirty: Type.Optional(Type.Boolean()),
 			action: Type.Optional(
 				Type.Union([
@@ -157,7 +163,8 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "workflow_status",
 		label: "Apnea status",
-		description: "Read-only snapshot of run state and legal tools. Never mutates.",
+		description:
+			"Read-only snapshot of run state and legal tools. Never mutates.",
 		parameters: Type.Object({}),
 		async execute() {
 			return toolContent(workflowStatus());

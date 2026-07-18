@@ -41,18 +41,24 @@ pi install git:github.com/<you>/pi-apnea
 
 Requires `~/.config/apnea/config.json` profiles (see `docs/protocol/config.md` or `/apnea-init`).
 
-### Tools
+### Commands (you type these — `/` autocomplete)
 
-| Tool | Purpose |
-|------|---------|
-| `workflow_start` | start / resume / abandon |
-| `dispatch_role` | task file + Herdr launch |
-| `workflow_wait` | artifact front-matter |
-| `workflow_commit_phase` | APPROVED + verify + jj/git |
-| `workflow_status` | read-only |
-| `workflow_reset_rounds` | **human only** |
+| Command | Purpose |
+|---------|---------|
+| `/apnea start <goal>` | start a run |
+| `/apnea resume` / `abandon` | resume or abandon |
+| `/apnea status` | read-only snapshot |
+| `/apnea dispatch <kind> [--rework]` | launch a role |
+| `/apnea wait` | wait for artifact |
+| `/apnea commit [--done] [msg]` | verify + commit phase |
+| `/apnea reset-rounds <gate>` | **human only** |
+| `/apnea-start` / `/apnea-status` | short aliases |
 
-Orchestrator allowlist: all of the above **except** `workflow_reset_rounds`, plus `read`.
+### Tools (model-facing names)
+
+Same operations as `workflow_start`, `dispatch_role`, `workflow_wait`, `workflow_commit_phase`, `workflow_status`, `workflow_reset_rounds`.
+
+Orchestrator allowlist: all tools **except** `workflow_reset_rounds`, plus `read`.
 
 ## Setup (planned)
 

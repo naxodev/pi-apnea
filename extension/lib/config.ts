@@ -22,7 +22,9 @@ function readJson(filePath: string): unknown {
 	try {
 		return JSON.parse(fs.readFileSync(filePath, "utf8"));
 	} catch (e) {
-		throw new Error(`invalid JSON at ${filePath}: ${e instanceof Error ? e.message : String(e)}`);
+		throw new Error(
+			`invalid JSON at ${filePath}: ${e instanceof Error ? e.message : String(e)}`,
+		);
 	}
 }
 

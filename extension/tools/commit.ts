@@ -88,7 +88,10 @@ export function workflowCommitPhase(params: {
 
 	if (!verify.ok) {
 		return err("verify commands failed — commit refused", {
-			data: { verify_log: path.relative(root, vlog), log_tail: verify.log.slice(-2000) },
+			data: {
+				verify_log: path.relative(root, vlog),
+				log_tail: verify.log.slice(-2000),
+			},
 		});
 	}
 

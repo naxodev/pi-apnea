@@ -20,8 +20,12 @@ describe("state machine", () => {
 	});
 
 	test("plan_review APPROVED → phase_packaging", () => {
-		expect(stepAfterArtifact("plan_review", "APPROVED")).toBe("phase_packaging");
-		expect(stepAfterArtifact("plan_review", "CHANGES_REQUIRED")).toBe("planning");
+		expect(stepAfterArtifact("plan_review", "APPROVED")).toBe(
+			"phase_packaging",
+		);
+		expect(stepAfterArtifact("plan_review", "CHANGES_REQUIRED")).toBe(
+			"planning",
+		);
 	});
 
 	test("code_review APPROVED → committing", () => {

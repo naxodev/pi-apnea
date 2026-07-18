@@ -46,7 +46,9 @@ export function workflowStart(params: {
 		let pendingStatus: string = "none";
 		if (pending) {
 			const abs = pending.startsWith("/") ? pending : `${root}/${pending}`;
-			pendingStatus = fs.existsSync(abs) ? "artifact_exists" : "artifact_missing";
+			pendingStatus = fs.existsSync(abs)
+				? "artifact_exists"
+				: "artifact_missing";
 		}
 		return ok("resume: re-resolve panes by label; do not auto-dispatch", {
 			state: existing,

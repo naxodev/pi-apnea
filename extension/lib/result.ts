@@ -1,6 +1,9 @@
 import type { ToolResult } from "./types.ts";
 
-export function ok(message: string, data?: Record<string, unknown>): ToolResult {
+export function ok(
+	message: string,
+	data?: Record<string, unknown>,
+): ToolResult {
 	return data ? { ok: true, message, data } : { ok: true, message };
 }
 
