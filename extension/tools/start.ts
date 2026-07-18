@@ -118,6 +118,8 @@ export function workflowStart(params: {
 		last_error: null,
 		pending_artifact: null,
 		pending_role: null,
+		pending_pane_id: null,
+		pending_pane_label: null,
 		package_root: packageRoot(),
 		reviewer_tree_fingerprint: null,
 		current_phase_package: null,

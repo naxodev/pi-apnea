@@ -263,6 +263,8 @@ export function workflowDispatch(params: {
 	if (!herdrEnabled()) {
 		state.pending_artifact = artifactRel;
 		state.pending_role = role;
+		state.pending_pane_id = null;
+		state.pending_pane_label = null;
 		saveState(state, root);
 		return ok(
 			`task written (no Herdr). Launch ${role} yourself; then workflow_wait.`,
@@ -280,12 +282,28 @@ export function workflowDispatch(params: {
 		if (mode === "oneshot") {
 			const cmd = resolveRoleCmd(cfg, role, "oneshot");
 			const r = runOneshotInPane(role, cmd, taskFile);
-			launch = { mode, pane_id: r.pane_id, script: rel(r.script, root), cmd };
+			launch = {
+				mode,
+				pane_id: r.pane_id,
+				label: r.label,
+				script: rel(r.script, root),
+				cmd,
+			};
+			state.pending_pane_id = r.pane_id;
+			state.pending_pane_label = r.label;
 		} else {
 			const cmd = resolveRoleCmd(cfg, role, "interactive");
 			const prompt = `Read ${rel(taskFile, root)} and execute it fully. Write the artifact at ${artifactRel}. Follow the brief. Do not commit.`;
-			const paneId = runInteractivePrompt(role, cmd, prompt);
-			launch = { mode, pane_id: paneId, cmd, prompt };
+			const r = runInteractivePrompt(role, cmd, prompt);
+			launch = {
+				mode,
+				pane_id: r.pane_id,
+				label: r.label,
+				cmd,
+				prompt,
+			};
+			state.pending_pane_id = r.pane_id;
+			state.pending_pane_label = r.label;
 		}
 	} catch (e) {
 		return err(e instanceof Error ? e.message : String(e), {

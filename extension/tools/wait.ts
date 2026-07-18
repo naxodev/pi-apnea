@@ -1,4 +1,3 @@
-import * as fs from "node:fs";
 import * as path from "node:path";
 import { loadConfig } from "../lib/config.ts";
 import {
@@ -10,8 +9,6 @@ import {
 	abs,
 	herdrEnabled,
 	paneGet,
-	findPaneByLabel,
-	roleLabel,
 	sleepMs,
 } from "../lib/herdr-wait.ts";
 import { err, ok } from "../lib/result.ts";
@@ -110,6 +107,8 @@ export function workflowWait(params: {
 			state.step = next;
 			state.pending_artifact = null;
 			state.pending_role = null;
+			state.pending_pane_id = null;
+			state.pending_pane_label = null;
 			state.reviewer_tree_fingerprint = null;
 			state.last_error = null;
 			saveState(state, root);
@@ -129,13 +128,13 @@ export function workflowWait(params: {
 			});
 		}
 
-		// liveness: if interactive role pane died
-		if (herdrEnabled() && state.pending_role) {
-			const id = findPaneByLabel(roleLabel(state.pending_role));
-			if (id) {
-				const info = paneGet(id);
+		// liveness: track the exact pane created for this dispatch (never by role label reuse)
+		if (herdrEnabled() && state.pending_pane_id) {
+			try {
+				const info = paneGet(state.pending_pane_id);
 				lastStatus = info.agent_status ?? "unknown";
-				// oneshot cold pane often unknown after exit — only escalate if interactive coder still missing artifact long after working→gone without file
+			} catch {
+				lastStatus = "pane_missing";
 			}
 		}
 
