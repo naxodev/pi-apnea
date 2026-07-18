@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://naxodev.com/apnea/state.schema.json",
+  "title": "ApneaRunState",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "slug", "step", "phase_index", "rounds", "vcs"],
+  "properties": {
+    "version": { "const": 1 },
+    "slug": { "type": "string", "minLength": 1 },
+    "step": {
+      "type": "string",
+      "enum": [
+        "planning",
+        "plan_review",
+        "phase_packaging",
+        "coding",
+        "code_review",
+        "committing",
+        "finishing",
+        "done"
+      ]
+    },
+    "phase_index": { "type": "integer", "minimum": 0 },
+    "phase_count_hint": { "type": ["integer", "null"], "minimum": 0 },
+    "rounds": {
+      "type": "object",
+      "description": "Keys like phase-01/plan_review or phase-01/code_review",
+      "additionalProperties": { "type": "integer", "minimum": 1 }
+    },
+    "vcs": { "type": "string", "enum": ["jj", "git"] },
+    "allow_dirty": { "type": "boolean" },
+    "goal": { "type": "string" },
+    "last_error": { "type": ["string", "null"] }
+  }
+}

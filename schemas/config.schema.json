@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://naxodev.com/apnea/config.schema.json",
+  "title": "ApneaConfig",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cmd_oneshot": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          },
+          "cmd_interactive": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          }
+        }
+      }
+    },
+    "roles": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["profile"],
+        "properties": {
+          "profile": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "review_round_cap": { "type": "integer", "minimum": 1, "maximum": 20 },
+    "timeouts_ms": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 1000 }
+    }
+  }
+}

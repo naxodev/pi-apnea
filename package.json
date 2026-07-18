@@ -1,0 +1,23 @@
+{
+  "name": "@naxodev/apnea",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Multi-role Pi + Herdr workflow: file-backed handoffs, no hidden subagents",
+  "license": "MIT",
+  "keywords": ["pi-package", "pi", "herdr", "apnea", "workflow"],
+  "pi": {
+    "skills": ["./skills"],
+    "prompts": ["./prompts"],
+    "extensions": []
+  },
+  "files": [
+    "CONTEXT.md",
+    "README.md",
+    "briefs",
+    "docs",
+    "schemas",
+    "skills",
+    "prompts",
+    "examples"
+  ]
+}
