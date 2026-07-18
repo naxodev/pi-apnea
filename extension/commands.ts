@@ -4,15 +4,17 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { formatResult } from "./lib/result.ts";
+import { apneaSetup } from "./lib/setup.ts";
+import type { DispatchKind } from "./lib/state-machine.ts";
 import type { ToolResult } from "./lib/types.ts";
 import { workflowCommitPhase } from "./tools/commit.ts";
 import { workflowDispatch } from "./tools/dispatch.ts";
 import { workflowStart } from "./tools/start.ts";
 import { workflowResetRounds, workflowStatus } from "./tools/status.ts";
 import { workflowWait } from "./tools/wait.ts";
-import type { DispatchKind } from "./lib/state-machine.ts";
 
 const SUBS = [
+	"setup",
 	"start",
 	"resume",
 	"abandon",
@@ -33,7 +35,12 @@ const DISPATCH_KINDS: DispatchKind[] = [
 	"pr_description",
 ];
 
-function notify(ctx: { ui: { notify: (m: string, l?: "info" | "error" | "warning") => void } }, r: ToolResult) {
+function notify(
+	ctx: {
+		ui: { notify: (m: string, l?: "info" | "error" | "warning") => void };
+	},
+	r: ToolResult,
+) {
 	const text = formatResult(r);
 	ctx.ui.notify(text, r.ok ? "info" : "error");
 }
@@ -50,7 +57,8 @@ function parseFlags(tokens: string[]): { flags: Set<string>; rest: string[] } {
 
 function helpText(): string {
 	return [
-		"Apnea commands (also available as tools to the model):",
+		"Apnea commands (tools remain for the model; you use /apnea):",
+		"  /apnea setup [--project] [--force]   # global profiles; optional project bindings",
 		"  /apnea start <goal> [--allow-dirty] [--slug=name]",
 		"  /apnea resume | abandon | status | wait",
 		"  /apnea dispatch <kind> [--rework]",
@@ -83,16 +91,28 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 					label: k,
 				}));
 				// Prefer completing just the kind token
-				const kindHits = DISPATCH_KINDS.filter((k) => k.startsWith(p)).map((k) => ({
-					value: k,
-					label: k,
-				}));
+				const kindHits = DISPATCH_KINDS.filter((k) => k.startsWith(p)).map(
+					(k) => ({
+						value: k,
+						label: k,
+					}),
+				);
 				return kindHits.length ? kindHits : hits.length ? hits : null;
+			}
+			if (sub === "setup") {
+				const p = parts[1] ?? "";
+				const flags = ["--project", "--force"];
+				const hits = flags
+					.filter((f) => f.startsWith(p) || p === "")
+					.map((f) => ({ value: f, label: f }));
+				return hits.length ? hits : null;
 			}
 			if (sub === "start" && parts.length === 2 && parts[1]?.startsWith("--")) {
 				const flags = ["--allow-dirty", "--slug="];
 				const p = parts[1] ?? "";
-				const hits = flags.filter((f) => f.startsWith(p)).map((f) => ({ value: f, label: f }));
+				const hits = flags
+					.filter((f) => f.startsWith(p))
+					.map((f) => ({ value: f, label: f }));
 				return hits.length ? hits : null;
 			}
 			if (sub === "commit") {
@@ -105,9 +125,15 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 				}
 			}
 			if (sub === "reset-rounds") {
-				const gates = ["plan_review", "phase-01/code_review", "phase-02/code_review"];
+				const gates = [
+					"plan_review",
+					"phase-01/code_review",
+					"phase-02/code_review",
+				];
 				const p = parts[1] ?? "";
-				const hits = gates.filter((g) => g.startsWith(p)).map((g) => ({ value: g, label: g }));
+				const hits = gates
+					.filter((g) => g.startsWith(p))
+					.map((g) => ({ value: g, label: g }));
 				return hits.length ? hits : null;
 			}
 			return null;
@@ -129,6 +155,16 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 						ctx.ui.notify(helpText(), "info");
 						return;
 
+					case "setup":
+						notify(
+							ctx,
+							apneaSetup({
+								project: flags.has("project") || tokens.includes("--project"),
+								force: flags.has("force") || tokens.includes("--force"),
+							}),
+						);
+						return;
+
 					case "start": {
 						// goal is everything not a flag; support --slug=x
 						let slug: string | undefined;
@@ -141,7 +177,10 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 						}
 						const goal = goalParts.join(" ").trim();
 						if (!goal) {
-							ctx.ui.notify("Usage: /apnea start <goal> [--allow-dirty] [--slug=name]", "error");
+							ctx.ui.notify(
+								"Usage: /apnea start <goal> [--allow-dirty] [--slug=name]",
+								"error",
+							);
 							return;
 						}
 						notify(
@@ -149,7 +188,8 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 							workflowStart({
 								goal,
 								slug,
-								allow_dirty: flags.has("allow-dirty") || tokens.includes("--allow-dirty"),
+								allow_dirty:
+									flags.has("allow-dirty") || tokens.includes("--allow-dirty"),
 								action: "start",
 							}),
 						);
@@ -197,12 +237,17 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 					}
 
 					case "commit": {
-						const message = rest.filter((t) => !t.startsWith("--")).join(" ").trim() || undefined;
+						const message =
+							rest
+								.filter((t) => !t.startsWith("--"))
+								.join(" ")
+								.trim() || undefined;
 						notify(
 							ctx,
 							workflowCommitPhase({
 								message,
-								no_remaining_phases: flags.has("done") || tokens.includes("--done"),
+								no_remaining_phases:
+									flags.has("done") || tokens.includes("--done"),
 							}),
 						);
 						return;

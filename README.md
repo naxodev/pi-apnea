@@ -45,6 +45,7 @@ Requires `~/.config/apnea/config.json` profiles (see `docs/protocol/config.md` o
 
 | Command | Purpose |
 |---------|---------|
+| `/apnea setup [--project] [--force]` | global profiles (+ optional project bindings) |
 | `/apnea start <goal>` | start a run |
 | `/apnea resume` / `abandon` | resume or abandon |
 | `/apnea status` | read-only snapshot |
@@ -60,14 +61,14 @@ Same operations as `workflow_start`, `dispatch_role`, `workflow_wait`, `workflow
 
 Orchestrator allowlist: all tools **except** `workflow_reset_rounds`, plus `read`.
 
-## Setup (planned)
+## Setup
 
 ```text
-/apnea-init
-# or skill: apnea-setup
+/apnea setup              # ~/.config/apnea/config.json from PATH
+/apnea setup --project    # also .apnea/config.json role→profile only
 ```
 
-Writes `~/.config/apnea/config.json` profiles and optional project role bindings. **No config UI in v1.**
+Fallback: skill `apnea-setup` or prompt `/apnea-init` (both point at the same rules). **No config UI in v1.**
 
 ## Non-goals (v1)
 

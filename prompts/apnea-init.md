@@ -1,13 +1,19 @@
 ---
-description: Initialize Apnea global profiles and optional project role bindings
+description: Initialize Apnea config (prefer /apnea setup)
 ---
 
-Run the apnea-setup skill.
+Prefer the slash command (no model needed):
+
+```
+/apnea setup
+/apnea setup --project
+```
+
+If tools/commands are unavailable, run the apnea-setup skill steps:
 
 1. Detect `pi`, `claude`, `codex`, `herdr`, `jj`, `git` on PATH.
-2. Create or update `~/.config/apnea/config.json` with safe default **profiles** only (no project cmds).
-3. If the user wants project bindings, write `.apnea/config.json` with role→profile names only.
-4. Remind them: paper protocol / manual gate must pass before extension tools exist.
-5. Point at package docs: `docs/protocol/config.md` and `docs/protocol/manual-gate.md`.
+2. Create or update `~/.config/apnea/config.json` with **profiles** only (no project cmds).
+3. Optional: `.apnea/config.json` with role→profile names only.
+4. Point at `docs/protocol/config.md`.
 
 Do not invent binaries. Do not write `cmd` into project config.
