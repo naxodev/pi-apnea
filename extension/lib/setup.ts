@@ -7,6 +7,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { hasApneaPlugin, herdrVersion, supportsFloating } from "./herdr.ts";
 import { globalConfigPath, packageRoot, projectConfigPath } from "./paths.ts";
+import { materializePiRoleAgentDir } from "./pi-role-agent.ts";
 import { err, ok } from "./result.ts";
 import type { ToolResult } from "./types.ts";
 
@@ -168,7 +169,9 @@ export function apneaSetup(params: {
 
 	const profiles: Record<string, unknown> = {};
 
-	// pi-grok: match Nacho's defaults; users can edit
+	// pi-grok: match Nacho's defaults; users can edit.
+	// Interactive launches inject PI_CODING_AGENT_DIR without pi-vimmode at
+	// dispatch time (see wrapInteractiveCmdNoVim) — profiles stay clean.
 	profiles["pi-grok"] = {
 		cmd_interactive: ["pi", "--provider", "grok-cli", "--model", "grok-4.5"],
 		cmd_oneshot: ["pi", "-p", "--provider", "grok-cli", "--model", "grok-4.5"],
@@ -285,6 +288,16 @@ export function apneaSetup(params: {
 		missing.push("neither jj nor git on PATH — commits will refuse");
 	}
 
+	// Pre-build the no-vim pi agent dir so first dispatch is fast.
+	let piRoleAgentDir: string | null = null;
+	try {
+		piRoleAgentDir = materializePiRoleAgentDir();
+	} catch (e) {
+		missing.push(
+			`pi role agent dir failed: ${e instanceof Error ? e.message : String(e)}`,
+		);
+	}
+
 	let herdrPlugin: ProvisionResult | null = null;
 	let herdrVer: string | null = null;
 	if (has.herdr) {
@@ -307,6 +320,7 @@ export function apneaSetup(params: {
 		detected: has,
 		roles: globalConfig.roles,
 		notes: missing,
+		pi_role_agent_dir: piRoleAgentDir,
 		next: "edit ~/.config/apnea/config.json if model ids differ, then /apnea start <goal> inside Herdr",
 	};
 	if (has.herdr) {

@@ -70,6 +70,8 @@ Orchestrator allowlist: all tools **except** `workflow_reset_rounds`, plus `read
 
 `pane_style` (`regular` default, `floating` opt-in) lives in config; floating needs herdr ≥ 0.7.4 + the linked plugin — see [`docs/protocol/config.md`](docs/protocol/config.md).
 
+Pi **coder** panes launch with a dedicated `PI_CODING_AGENT_DIR` that drops `pi-vimmode` (modal vim traps herdr prompt paste). Your personal orchestrator pi keeps vim; only Apnea-launched role panes are no-vim.
+
 Fallback: skill `apnea-setup` or prompt `/apnea-init` (both point at the same rules). **No config UI in v1.**
 
 ## Non-goals (v1)

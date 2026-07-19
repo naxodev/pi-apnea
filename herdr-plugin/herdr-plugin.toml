@@ -8,5 +8,5 @@ platforms = ["linux", "macos"]
 [[panes]]
 id = "worker"
 title = "Apnea worker"
-placement = "popup"
+placement = "overlay"
 command = ["bash", "scripts/run-task.sh"]

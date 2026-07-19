@@ -60,9 +60,7 @@ describe("workflow smoke", () => {
 			const disp = workflowDispatch({ kind: "plan" });
 			expect(disp.ok).toBe(true);
 			if (disp.ok) {
-				expect(fs.existsSync(path.join(d, String(disp.data?.task)))).toBe(
-					true,
-				);
+				expect(fs.existsSync(path.join(d, String(disp.data?.task)))).toBe(true);
 			}
 		} finally {
 			if (prevHerdr === undefined) delete process.env.HERDR_ENV;

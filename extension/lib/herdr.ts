@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
+import { isPiCmd, wrapInteractiveCmdNoVim } from "./pi-role-agent.ts";
 import type { PaneStyle, Role } from "./types.ts";
 
 export function herdrEnabled(): boolean {
@@ -111,8 +112,8 @@ export function paneSendKeys(paneId: string, keys: string[]): void {
 /**
  * After submitting a prompt, confirm the agent actually started working.
  * Claude often parks multi-line paste in the input without submitting;
- * pi+vim can leave the prompt in INSERT mode. Recover with Enter (then
- * one full re-submit) before giving up.
+ * pi+vim can leave the prompt in INSERT mode. Recover with Escape+Enter
+ * (then one full re-submit) before giving up.
  */
 export function ensurePromptSubmitted(
 	paneId: string,
@@ -140,9 +141,12 @@ export function ensurePromptSubmitted(
 		return { accepted: true, attempts, last_status: status };
 	}
 
-	// Paste often lands without submit — Enter alone recovers Claude.
+	// Paste often lands without submit — Enter alone recovers Claude;
+	// Escape first exits pi-vim INSERT so Enter can actually submit.
 	attempts += 1;
 	try {
+		paneSendKeys(paneId, ["Escape"]);
+		sleepMs(150);
 		paneSendKeys(paneId, ["Enter"]);
 	} catch {
 		/* pane may have died */
@@ -155,6 +159,8 @@ export function ensurePromptSubmitted(
 	// Full re-submit once (covers lost/mangled first paste).
 	attempts += 1;
 	try {
+		paneSendKeys(paneId, ["Escape"]);
+		sleepMs(100);
 		paneRun(paneId, prompt);
 	} catch {
 		return {
@@ -271,14 +277,10 @@ export function acquireRolePane(
 	renamePane(paneId, label);
 	if (opts?.interactiveCmd?.length) {
 		// Launch the interactive harness only (no task argv).
-		// cwd: herdr split inherits; also cd then exec so profile is in project.
-		const cmd = shellJoin([
-			"cd",
-			process.cwd(),
-			"&&",
-			"exec",
-			...opts.interactiveCmd,
-		]);
+		// Pi roles get PI_CODING_AGENT_DIR without pi-vimmode so pane-run pastes
+		// are not trapped in modal INSERT.
+		const launchCmd = wrapInteractiveCmdNoVim(opts.interactiveCmd);
+		const cmd = shellJoin(["cd", process.cwd(), "&&", "exec", ...launchCmd]);
 		paneRun(paneId, cmd);
 	}
 	return { pane_id: paneId, label, reused: false };
@@ -287,7 +289,7 @@ export function acquireRolePane(
 export function shellJoin(parts: string[]): string {
 	return parts
 		.map((p) => {
-			if (p === "&&" || p === "|" || p === "exec") return p;
+			if (p === "&&" || p === "|" || p === "exec" || p === "env") return p;
 			if (/^[A-Za-z0-9_./:=,@+-]+$/.test(p)) return p;
 			return `'${p.replace(/'/g, `'\\''`)}'`;
 		})
@@ -339,6 +341,18 @@ export function runInteractivePrompt(
 		const st = paneGet(acquired.pane_id).agent_status;
 		if (st !== "idle" && st !== "done") {
 			waitAgentReady(acquired.pane_id, 30_000);
+		}
+	}
+
+	// Reused pi panes (or any pi that still has vimmode) — slash-disable
+	// before the task pointer so herdr paste submits as a normal prompt.
+	if (isPiCmd(interactiveCmd)) {
+		try {
+			paneRun(acquired.pane_id, "/vimmode off");
+			waitAgentReady(acquired.pane_id, 5_000);
+			sleepMs(300);
+		} catch {
+			/* best-effort; no-vim agent dir is the primary guard */
 		}
 	}
 
