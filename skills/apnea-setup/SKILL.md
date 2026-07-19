@@ -30,9 +30,11 @@ Leave the user with a valid **global** profile config and optional **project** r
    - Define profiles only for binaries that exist.
    - Include both `cmd_oneshot` and `cmd_interactive` where the harness supports them.
    - Bind default roles: orchestrator+coder → pi profile; planner+reviewer → claude or codex if present, else pi.
-5. Optionally write `.apnea/config.json` with **only** `{ "roles": { "...": { "profile": "..." } } }`.
-6. Validate against trust rules: no project `cmd_*`, no unknown isolation modes.
-7. Next: `/apnea start <goal>` inside Herdr.
+   - Preserve an existing `pane_style` (`regular`|`floating`) if present; **never write/flip `pane_style`** — it is user opt-in only.
+5. When herdr is on PATH, provision the herdr `apnea` plugin: copy package `herdr-plugin/` → `~/.config/apnea/herdr-plugin/` (refresh on every run) and, if herdr ≥ 0.7.4 and the plugin is not already linked, run `herdr plugin link ~/.config/apnea/herdr-plugin`. On herdr < 0.7.4, skip link and note the upgrade requirement.
+6. Optionally write `.apnea/config.json` with **only** `{ "roles": { "...": { "profile": "..." } } }`.
+7. Validate against trust rules: no project `cmd_*`, no unknown isolation modes.
+8. Next: `/apnea start <goal>` inside Herdr.
 
 ## Refuse
 

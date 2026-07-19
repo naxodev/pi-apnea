@@ -5,7 +5,8 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { globalConfigPath, projectConfigPath } from "./paths.ts";
+import { hasApneaPlugin, herdrVersion, supportsFloating } from "./herdr.ts";
+import { globalConfigPath, packageRoot, projectConfigPath } from "./paths.ts";
 import { err, ok } from "./result.ts";
 import type { ToolResult } from "./types.ts";
 
@@ -36,6 +37,112 @@ function deepMergeProfiles(
 		if (!(k in out)) out[k] = v;
 	}
 	return out;
+}
+
+/**
+ * Carry a valid user pane_style preference forward. Setup never writes the
+ * key when absent, and never invents values — only preserves exact "regular"
+ * or "floating". Invalid prev values are dropped.
+ */
+export function preservePaneStyle(
+	prev: Record<string, unknown>,
+): "regular" | "floating" | undefined {
+	const v = prev.pane_style;
+	if (v === "regular" || v === "floating") return v;
+	return undefined;
+}
+
+export type ProvisionResult = {
+	copied: string | null; // dest dir, or null when skipped
+	linked: boolean; // true only when we ran `herdr plugin link` OK
+	already_linked: boolean;
+	notes: string[];
+};
+
+/**
+ * Copy the package's herdr-plugin into a stable config-local path and, when
+ * herdr is new enough and the plugin isn't already linked, run
+ * `herdr plugin link`. Dependencies are injected so tests never touch the
+ * real home dir or spawn herdr.
+ */
+export function provisionHerdrPlugin(opts: {
+	srcDir: string; // packageRoot()/herdr-plugin
+	destDir: string; // dirname(globalConfigPath())/herdr-plugin
+	version: [number, number, number] | null; // herdrVersion()
+	hasPlugin: () => boolean; // hasApneaPlugin
+	link: (dir: string) => { ok: boolean; raw: string }; // spawns `herdr plugin link <dir>`
+}): ProvisionResult {
+	const notes: string[] = [];
+
+	if (!fs.existsSync(opts.srcDir)) {
+		notes.push("herdr-plugin missing from package — reinstall @naxodev/apnea");
+		return {
+			copied: null,
+			linked: false,
+			already_linked: false,
+			notes,
+		};
+	}
+
+	fs.cpSync(opts.srcDir, opts.destDir, { recursive: true, force: true });
+	const runTask = path.join(opts.destDir, "scripts", "run-task.sh");
+	if (fs.existsSync(runTask)) {
+		fs.chmodSync(runTask, 0o755);
+	}
+
+	if (!supportsFloating(opts.version)) {
+		const ver =
+			opts.version == null
+				? "unknown"
+				: `${opts.version[0]}.${opts.version[1]}.${opts.version[2]}`;
+		notes.push(
+			`herdr ${ver} < 0.7.4 — floating panes unavailable; run \`herdr update\`, then re-run /apnea setup`,
+		);
+		return {
+			copied: opts.destDir,
+			linked: false,
+			already_linked: false,
+			notes,
+		};
+	}
+
+	if (opts.hasPlugin()) {
+		return {
+			copied: opts.destDir,
+			linked: false,
+			already_linked: true,
+			notes,
+		};
+	}
+
+	const linkResult = opts.link(opts.destDir);
+	if (!linkResult.ok) {
+		notes.push(
+			`herdr plugin link failed: ${linkResult.raw.trim() || "(no output)"}`,
+		);
+		return {
+			copied: opts.destDir,
+			linked: false,
+			already_linked: false,
+			notes,
+		};
+	}
+
+	return {
+		copied: opts.destDir,
+		linked: true,
+		already_linked: false,
+		notes,
+	};
+}
+
+function linkHerdrPlugin(dir: string): { ok: boolean; raw: string } {
+	const r = spawnSync("herdr", ["plugin", "link", dir], {
+		encoding: "utf8",
+		maxBuffer: 10 * 1024 * 1024,
+	});
+	const raw = `${r.stdout ?? ""}${r.stderr ?? ""}`;
+	return { ok: r.status === 0, raw };
 }
 
 export function apneaSetup(params: {
@@ -120,7 +227,9 @@ export function apneaSetup(params: {
 		);
 	}
 
-	const globalConfig = {
+	const preservedPaneStyle = preservePaneStyle(prev);
+
+	const globalConfig: Record<string, unknown> = {
 		profiles: nextProfiles,
 		roles: params.force || !prev.roles ? roles : prev.roles,
 		review_round_cap:
@@ -137,6 +246,10 @@ export function apneaSetup(params: {
 						verify: 900_000,
 					},
 	};
+	// Preserve user opt-in only — never introduce pane_style when absent.
+	if (preservedPaneStyle !== undefined) {
+		globalConfig.pane_style = preservedPaneStyle;
+	}
 
 	// refuse to write if somehow project-shaped keys snuck in
 	const serialized = `${JSON.stringify(globalConfig, null, 2)}\n`;
@@ -172,19 +285,47 @@ export function apneaSetup(params: {
 		missing.push("neither jj nor git on PATH — commits will refuse");
 	}
 
-	return ok(`wrote global config ${gPath}`, {
+	let herdrPlugin: ProvisionResult | null = null;
+	let herdrVer: string | null = null;
+	if (has.herdr) {
+		const version = herdrVersion();
+		herdrVer =
+			version == null ? null : `${version[0]}.${version[1]}.${version[2]}`;
+		herdrPlugin = provisionHerdrPlugin({
+			srcDir: path.join(packageRoot(), "herdr-plugin"),
+			destDir: path.join(path.dirname(globalConfigPath()), "herdr-plugin"),
+			version,
+			hasPlugin: hasApneaPlugin,
+			link: linkHerdrPlugin,
+		});
+		missing.push(...herdrPlugin.notes);
+	}
+
+	const data: Record<string, unknown> = {
 		global: gPath,
 		project: projectPath,
 		detected: has,
 		roles: globalConfig.roles,
 		notes: missing,
 		next: "edit ~/.config/apnea/config.json if model ids differ, then /apnea start <goal> inside Herdr",
-	});
+	};
+	if (has.herdr) {
+		data.herdr_version = herdrVer;
+		data.herdr_plugin = herdrPlugin
+			? {
+					copied: herdrPlugin.copied,
+					linked: herdrPlugin.linked,
+					already_linked: herdrPlugin.already_linked,
+				}
+			: null;
+	}
+
+	return ok(`wrote global config ${gPath}`, data);
 }
 
 export function setupHelp(): string {
 	return [
-		"/apnea setup              write/merge ~/.config/apnea/config.json from PATH",
+		"/apnea setup              write/merge ~/.config/apnea/config.json from PATH; also provision the herdr apnea plugin when herdr is present",
 		"/apnea setup --project    also write .apnea/config.json role bindings (no cmds)",
 		"/apnea setup --force      replace global profiles/roles instead of merge",
 	].join("\n");

@@ -15,5 +15,6 @@ If tools/commands are unavailable, run the apnea-setup skill steps:
 2. Create or update `~/.config/apnea/config.json` with **profiles** only (no project cmds).
 3. Optional: `.apnea/config.json` with role→profile names only.
 4. Point at `docs/protocol/config.md`.
+5. Note `pane_style` (`regular` default / `floating` opt-in, needs herdr ≥ 0.7.4) — setup never writes it.
 
 Do not invent binaries. Do not write `cmd` into project config.

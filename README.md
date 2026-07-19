@@ -64,9 +64,11 @@ Orchestrator allowlist: all tools **except** `workflow_reset_rounds`, plus `read
 ## Setup
 
 ```text
-/apnea setup              # ~/.config/apnea/config.json from PATH
+/apnea setup              # ~/.config/apnea/config.json from PATH (+ herdr apnea plugin when herdr is present)
 /apnea setup --project    # also .apnea/config.json role→profile only
 ```
+
+`pane_style` (`regular` default, `floating` opt-in) lives in config; floating needs herdr ≥ 0.7.4 + the linked plugin — see [`docs/protocol/config.md`](docs/protocol/config.md).
 
 Fallback: skill `apnea-setup` or prompt `/apnea-init` (both point at the same rules). **No config UI in v1.**
 

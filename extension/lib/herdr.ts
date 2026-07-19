@@ -157,7 +157,11 @@ export function ensurePromptSubmitted(
 	try {
 		paneRun(paneId, prompt);
 	} catch {
-		return { accepted: false, attempts, last_status: paneGet(paneId).agent_status };
+		return {
+			accepted: false,
+			attempts,
+			last_status: paneGet(paneId).agent_status,
+		};
 	}
 	sleepMs(settleMs);
 	status = waitForWorking(workingWaitMs);
@@ -395,12 +399,7 @@ export function hasApneaPlugin(): boolean {
 	if (json) {
 		const res = resultOf(json);
 		const plugins = (res?.plugins as Array<Record<string, unknown>>) ?? [];
-		if (
-			plugins.some(
-				(p) =>
-					p.plugin_id === "apnea" || p.id === "apnea" || p.name === "Apnea",
-			)
-		) {
+		if (plugins.some((p) => p.plugin_id === "apnea" || p.id === "apnea")) {
 			return true;
 		}
 	}
