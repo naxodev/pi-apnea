@@ -97,50 +97,75 @@ export function paneRun(paneId: string, command: string): void {
 }
 
 export function paneGet(paneId: string): {
+	ok: boolean;
 	agent_status?: string;
 	label?: string;
 } {
 	const r = herdr(["pane", "get", paneId]);
+	if (!r.ok) return { ok: false };
 	const res = resultOf(r.json);
 	const pane = (res?.pane as Record<string, unknown>) ?? {};
+	// if herdr returned ok but no pane, treat as missing
+	if (!pane.pane_id && !pane.agent_status && !pane.label) {
+		// some responses still nest pane
+	}
 	return {
+		ok: true,
 		agent_status: pane.agent_status ? String(pane.agent_status) : undefined,
 		label: pane.label ? String(pane.label) : undefined,
 	};
 }
 
-/** Unique per dispatch so we never collide with or claim another pane. */
-export function roleLabel(role: string, dispatchId?: string): string {
+/** True if Herdr still knows this pane id. */
+export function paneAlive(paneId: string): boolean {
+	const info = paneGet(paneId);
+	return info.ok;
+}
+
+/** Unique label for a role slot (stable for the run when we reuse the pane). */
+export function roleLabel(role: string, slotId?: string): string {
 	const id =
-		dispatchId ??
+		slotId ??
 		`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 	return `apnea:${role}:${id}`;
 }
 
+export type RolePaneRef = { pane_id: string; label: string };
+
 /**
- * Always create a brand-new pane for this dispatch.
- * Never reuses or renames an existing labeled pane.
+ * Resolve a pane for a role:
+ * - reuse `prefer` if that pane_id is still alive
+ * - otherwise split a new pane with a unique label
+ *
+ * Never claims an unrelated pane by scanning labels alone.
  */
-export function createRolePane(
+export function acquireRolePane(
 	role: string,
-	opts?: { interactiveCmd?: string[]; dispatchId?: string },
-): { pane_id: string; label: string } {
+	opts?: {
+		prefer?: RolePaneRef | null;
+		interactiveCmd?: string[];
+	},
+): RolePaneRef & { reused: boolean } {
 	if (!herdrEnabled()) {
 		throw new Error("not inside Herdr (HERDR_ENV!=1); cannot manage panes");
 	}
-	const label = roleLabel(role, opts?.dispatchId);
+
+	if (opts?.prefer?.pane_id && paneAlive(opts.prefer.pane_id)) {
+		return {
+			pane_id: opts.prefer.pane_id,
+			label: opts.prefer.label,
+			reused: true,
+		};
+	}
+
+	const label = roleLabel(role);
 	const paneId = splitPane();
 	renamePane(paneId, label);
 	if (opts?.interactiveCmd?.length) {
-		const cmd = shellJoin([
-			"cd",
-			process.cwd(),
-			"&&",
-			...opts.interactiveCmd,
-		]);
+		const cmd = shellJoin(["cd", process.cwd(), "&&", ...opts.interactiveCmd]);
 		paneRun(paneId, cmd);
 	}
-	return { pane_id: paneId, label };
+	return { pane_id: paneId, label, reused: false };
 }
 
 export function shellJoin(parts: string[]): string {
@@ -153,13 +178,27 @@ export function shellJoin(parts: string[]): string {
 		.join(" ");
 }
 
-/** Write a oneshot runner script and execute it in a fresh role pane. */
+function waitAgentReady(
+	paneId: string,
+	timeoutMs = 90_000,
+): string | undefined {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		const s = paneGet(paneId).agent_status;
+		if (s === "idle" || s === "done") return s;
+		spawnSync("sleep", ["1"]);
+	}
+	return paneGet(paneId).agent_status;
+}
+
+/** Oneshot: reuse shell pane if we have a live pane_id; else create. Always new process. */
 export function runOneshotInPane(
 	role: string,
 	cmd: string[],
 	taskFileAbs: string,
-): { pane_id: string; label: string; script: string } {
-	const { pane_id, label } = createRolePane(role);
+	prefer?: RolePaneRef | null,
+): { pane_id: string; label: string; script: string; reused: boolean } {
+	const acquired = acquireRolePane(role, { prefer });
 	const scriptsDir = path.join(process.cwd(), ".apnea", "tasks");
 	fs.mkdirSync(scriptsDir, { recursive: true });
 	const script = path.join(scriptsDir, `run-${role}-${Date.now()}.sh`);
@@ -171,35 +210,64 @@ cd ${shellJoin([process.cwd()])}
 exec ${cmdStr} < ${shellJoin([taskFileAbs])}
 `;
 	fs.writeFileSync(script, body, { mode: 0o755 });
-	paneRun(pane_id, script);
-	return { pane_id, label, script };
+	paneRun(acquired.pane_id, script);
+	return {
+		pane_id: acquired.pane_id,
+		label: acquired.label,
+		script,
+		reused: acquired.reused,
+	};
 }
 
 /**
- * Fresh interactive pane every dispatch (no reuse).
- * Waits until agent is idle/done before sending the prompt.
+ * Interactive: reuse live pane if idle/done (follow-up prompt).
+ * If missing or stuck working/blocked, spawn a new pane + agent.
  */
 export function runInteractivePrompt(
 	role: string,
 	interactiveCmd: string[],
 	prompt: string,
-): { pane_id: string; label: string } {
-	const { pane_id, label } = createRolePane(role, {
-		interactiveCmd,
+	prefer?: RolePaneRef | null,
+): { pane_id: string; label: string; reused: boolean } {
+	let preferUse: RolePaneRef | null = null;
+	if (prefer?.pane_id && paneAlive(prefer.pane_id)) {
+		const st = paneGet(prefer.pane_id).agent_status;
+		// only reuse when agent can take a new prompt
+		if (st === "idle" || st === "done" || st === "unknown") {
+			preferUse = prefer;
+		}
+		// if working/blocked, fall through to new pane
+	}
+
+	const acquired = acquireRolePane(role, {
+		prefer: preferUse,
+		interactiveCmd: preferUse ? undefined : interactiveCmd,
 	});
-	const deadline = Date.now() + 90_000;
-	while (Date.now() < deadline) {
-		const s = paneGet(pane_id).agent_status;
-		if (s === "idle" || s === "done") break;
-		// still starting
-		spawnSync("sleep", ["1"]);
+
+	if (!acquired.reused) {
+		waitAgentReady(acquired.pane_id);
+	} else {
+		// ensure idle before follow-up
+		const st = paneGet(acquired.pane_id).agent_status;
+		if (st === "unknown") {
+			// shell without agent — launch interactive cmd
+			paneRun(
+				acquired.pane_id,
+				shellJoin(["cd", process.cwd(), "&&", ...interactiveCmd]),
+			);
+			waitAgentReady(acquired.pane_id);
+		} else if (st !== "idle" && st !== "done") {
+			// shouldn't happen given preferUse filter; wait briefly
+			waitAgentReady(acquired.pane_id, 30_000);
+		}
 	}
-	const ready = paneGet(pane_id).agent_status;
-	if (ready !== "idle" && ready !== "done") {
-		// still send — agent may accept input; surface status via return path
-	}
-	paneRun(pane_id, prompt);
-	return { pane_id, label };
+
+	paneRun(acquired.pane_id, prompt);
+	return {
+		pane_id: acquired.pane_id,
+		label: acquired.label,
+		reused: acquired.reused,
+	};
 }
 
 export function sleepMs(ms: number): void {

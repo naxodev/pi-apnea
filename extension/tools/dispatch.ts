@@ -260,6 +260,8 @@ export function workflowDispatch(params: {
 	const mode = ROLE_MODE[role];
 	let launch: Record<string, unknown> = { mode };
 
+	if (!state.role_panes) state.role_panes = {};
+
 	if (!herdrEnabled()) {
 		state.pending_artifact = artifactRel;
 		state.pending_role = role;
@@ -278,32 +280,38 @@ export function workflowDispatch(params: {
 		);
 	}
 
+	const prefer = state.role_panes[role] ?? null;
+
 	try {
 		if (mode === "oneshot") {
 			const cmd = resolveRoleCmd(cfg, role, "oneshot");
-			const r = runOneshotInPane(role, cmd, taskFile);
+			const r = runOneshotInPane(role, cmd, taskFile, prefer);
 			launch = {
 				mode,
 				pane_id: r.pane_id,
 				label: r.label,
+				reused: r.reused,
 				script: rel(r.script, root),
 				cmd,
 			};
 			state.pending_pane_id = r.pane_id;
 			state.pending_pane_label = r.label;
+			state.role_panes[role] = { pane_id: r.pane_id, label: r.label };
 		} else {
 			const cmd = resolveRoleCmd(cfg, role, "interactive");
 			const prompt = `Read ${rel(taskFile, root)} and execute it fully. Write the artifact at ${artifactRel}. Follow the brief. Do not commit.`;
-			const r = runInteractivePrompt(role, cmd, prompt);
+			const r = runInteractivePrompt(role, cmd, prompt, prefer);
 			launch = {
 				mode,
 				pane_id: r.pane_id,
 				label: r.label,
+				reused: r.reused,
 				cmd,
 				prompt,
 			};
 			state.pending_pane_id = r.pane_id;
 			state.pending_pane_label = r.label;
+			state.role_panes[role] = { pane_id: r.pane_id, label: r.label };
 		}
 	} catch (e) {
 		return err(e instanceof Error ? e.message : String(e), {

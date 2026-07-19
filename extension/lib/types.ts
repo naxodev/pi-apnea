@@ -48,10 +48,15 @@ export interface RunState {
 	pending_artifact: string | null;
 	/** Role for pending dispatch */
 	pending_role: Role | null;
-	/** Herdr pane id for the in-flight dispatch (fresh pane each time) */
+	/** Herdr pane id for the in-flight dispatch */
 	pending_pane_id: string | null;
 	/** Label of that pane (apnea:role:unique) */
 	pending_pane_label: string | null;
+	/**
+	 * Last known live pane per role, keyed by role name.
+	 * Reuse is by pane_id only (never by scanning ambiguous labels).
+	 */
+	role_panes: Partial<Record<Role, { pane_id: string; label: string }>>;
 	/** Absolute path to package root (briefs) */
 	package_root: string;
 	/** Tree snapshot fingerprint before reviewer dispatch */

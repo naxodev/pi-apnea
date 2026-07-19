@@ -36,6 +36,17 @@
     "pending_role": { "type": ["string", "null"] },
     "pending_pane_id": { "type": ["string", "null"] },
     "pending_pane_label": { "type": ["string", "null"] },
+    "role_panes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["pane_id", "label"],
+        "properties": {
+          "pane_id": { "type": "string" },
+          "label": { "type": "string" }
+        }
+      }
+    },
     "package_root": { "type": "string" },
     "reviewer_tree_fingerprint": { "type": ["string", "null"] },
     "current_phase_package": { "type": ["string", "null"] },

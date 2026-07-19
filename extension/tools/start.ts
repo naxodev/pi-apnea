@@ -120,6 +120,7 @@ export function workflowStart(params: {
 		pending_role: null,
 		pending_pane_id: null,
 		pending_pane_label: null,
+		role_panes: {},
 		package_root: packageRoot(),
 		reviewer_tree_fingerprint: null,
 		current_phase_package: null,

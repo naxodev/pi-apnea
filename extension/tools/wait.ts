@@ -5,12 +5,7 @@ import {
 	isCompleteArtifact,
 	readArtifact,
 } from "../lib/frontmatter.ts";
-import {
-	abs,
-	herdrEnabled,
-	paneGet,
-	sleepMs,
-} from "../lib/herdr-wait.ts";
+import { abs, herdrEnabled, paneGet, sleepMs } from "../lib/herdr-wait.ts";
 import { err, ok } from "../lib/result.ts";
 import {
 	assertToolAllowed,
@@ -128,14 +123,10 @@ export function workflowWait(params: {
 			});
 		}
 
-		// liveness: track the exact pane created for this dispatch (never by role label reuse)
+		// liveness: exact pane id for this dispatch (from state, not label scan)
 		if (herdrEnabled() && state.pending_pane_id) {
-			try {
-				const info = paneGet(state.pending_pane_id);
-				lastStatus = info.agent_status ?? "unknown";
-			} catch {
-				lastStatus = "pane_missing";
-			}
+			const info = paneGet(state.pending_pane_id);
+			lastStatus = info.ok ? (info.agent_status ?? "unknown") : "pane_missing";
 		}
 
 		sleepMs(poll);
