@@ -20,7 +20,11 @@ Unknown keys and unimplemented values (`isolation: "worktree"`) **hard-error** a
       "cmd_oneshot": ["pi", "--print", "--provider", "grok-cli", "--model", "grok-4.5"]
     },
     "claude-fable": {
-      "cmd_oneshot": ["claude", "-p", "--model", "claude-fable-5"],
+      // oneshot needs Write (or equivalent) so the role can emit artifacts
+      "cmd_oneshot": [
+        "claude", "-p", "--model", "claude-fable-5",
+        "--allowedTools", "Read,Write,Edit,Glob,Grep"
+      ],
       "cmd_interactive": ["claude", "--model", "claude-fable-5"]
     }
   },

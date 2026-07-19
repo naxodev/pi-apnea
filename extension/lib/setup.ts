@@ -4,7 +4,6 @@
  */
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { globalConfigPath, projectConfigPath } from "./paths.ts";
 import { err, ok } from "./result.ts";
@@ -74,8 +73,16 @@ export function apneaSetup(params: {
 	};
 
 	if (has.claude) {
+		// oneshot must be able to Write artifacts; toy gate used this exact set
 		profiles["claude-fable"] = {
-			cmd_oneshot: ["claude", "-p", "--model", "claude-fable-5"],
+			cmd_oneshot: [
+				"claude",
+				"-p",
+				"--model",
+				"claude-fable-5",
+				"--allowedTools",
+				"Read,Write,Edit,Glob,Grep",
+			],
 			cmd_interactive: ["claude", "--model", "claude-fable-5"],
 		};
 	}
