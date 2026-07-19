@@ -5,6 +5,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { registerApneaCommands } from "./commands.ts";
 import { toolContent } from "./lib/result.ts";
+import type { ToolResult } from "./lib/types.ts";
 import { workflowCommitPhase } from "./tools/commit.ts";
 import { workflowDispatch } from "./tools/dispatch.ts";
 import { workflowStart } from "./tools/start.ts";
@@ -116,7 +117,7 @@ export default function (pi: ExtensionAPI) {
 		name: "workflow_wait",
 		label: "Apnea wait",
 		description:
-			"Wait for pending artifact front-matter. Agent-status is liveness only. Advances state machine on success.",
+			"Wait for pending artifact front-matter (async; Esc-cancellable). Agent-status is liveness only; oneshot death without artifact fails fast. Advances state machine on success.",
 		parameters: Type.Object({
 			timeout_ms: Type.Optional(Type.Number()),
 			poll_ms: Type.Optional(Type.Number()),
@@ -124,12 +125,35 @@ export default function (pi: ExtensionAPI) {
 		async execute(
 			_id: string,
 			params: { timeout_ms?: number; poll_ms?: number },
+			signal: AbortSignal | undefined,
+			onUpdate:
+				| ((partial: {
+						content: Array<{ type: "text"; text: string }>;
+						details: ToolResult;
+				  }) => void)
+				| undefined,
 		) {
 			return toolContent(
-				workflowWait({
-					timeout_ms: params.timeout_ms,
-					poll_ms: params.poll_ms,
-				}),
+				await workflowWait(
+					{
+						timeout_ms: params.timeout_ms,
+						poll_ms: params.poll_ms,
+					},
+					{
+						signal,
+						onUpdate: onUpdate
+							? (partial) => {
+									onUpdate({
+										content: partial.content,
+										details: {
+											ok: true,
+											message: partial.content[0]?.text ?? "",
+										},
+									});
+							  }
+							: undefined,
+					},
+				),
 			);
 		},
 	});

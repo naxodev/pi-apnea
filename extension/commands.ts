@@ -243,7 +243,8 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 						const timeout_ms = timeoutTok
 							? Number(timeoutTok.slice("--timeout=".length))
 							: undefined;
-						notify(ctx, workflowWait({ timeout_ms }));
+						const r = await workflowWait({ timeout_ms });
+						notify(ctx, r);
 						return;
 					}
 
