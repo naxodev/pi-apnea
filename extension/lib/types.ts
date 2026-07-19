@@ -12,6 +12,8 @@ export type Role = "orchestrator" | "planner" | "reviewer" | "coder";
 
 export type RoleMode = "oneshot" | "interactive";
 
+export type PaneStyle = "regular" | "floating";
+
 export type Verdict = "APPROVED" | "CHANGES_REQUIRED";
 
 export type VcsBackend = "jj" | "git";
@@ -30,6 +32,7 @@ export interface ApneaConfig {
 	roles: Record<string, RoleBinding>;
 	review_round_cap: number;
 	timeouts_ms: Record<string, number>;
+	pane_style: PaneStyle;
 }
 
 export interface RunState {

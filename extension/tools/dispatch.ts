@@ -253,7 +253,10 @@ export function workflowDispatch(params: {
 		state.reviewer_tree_fingerprint = treeFingerprint(root, state.vcs);
 	}
 
-	let launch: Record<string, unknown> = { mode: ROLE_MODE[role] };
+	let launch: Record<string, unknown> = {
+		mode: ROLE_MODE[role],
+		pane_style: cfg.pane_style,
+	};
 
 	if (!state.role_panes) state.role_panes = {};
 
@@ -270,6 +273,7 @@ export function workflowDispatch(params: {
 				artifact: artifactRel,
 				round,
 				step: state.step,
+				launch,
 				next: "workflow_wait",
 			},
 		);
@@ -296,6 +300,7 @@ export function workflowDispatch(params: {
 			reused: r.reused,
 			cmd,
 			prompt,
+			pane_style: cfg.pane_style,
 		};
 		state.pending_pane_id = r.pane_id;
 		state.pending_pane_label = r.label;

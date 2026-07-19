@@ -39,6 +39,12 @@
     "timeouts_ms": {
       "type": "object",
       "additionalProperties": { "type": "integer", "minimum": 1000 }
+    },
+    "pane_style": {
+      "type": "string",
+      "enum": ["regular", "floating"],
+      "default": "regular",
+      "description": "Herdr pane style for role dispatches. \"floating\" applies to oneshot roles only and requires herdr >= 0.7.4; interactive roles always use regular panes. Default: regular."
     }
   }
 }

@@ -3,6 +3,7 @@ import { globalConfigPath, packageRoot, projectConfigPath } from "./paths.ts";
 import {
 	DEFAULT_TIMEOUTS,
 	type ApneaConfig,
+	type PaneStyle,
 	type Profile,
 	type Role,
 	type RoleMode,
@@ -35,6 +36,14 @@ function assertObject(v: unknown, label: string): Record<string, unknown> {
 	return v as Record<string, unknown>;
 }
 
+function parsePaneStyle(v: unknown, source: string): PaneStyle {
+	if (v === undefined) return "regular";
+	if (v === "regular" || v === "floating") return v;
+	throw new Error(
+		`${source} pane_style must be "regular" or "floating", got ${JSON.stringify(v)}`,
+	);
+}
+
 function parseProfile(name: string, raw: unknown): Profile {
 	const o = assertObject(raw, `profile ${name}`);
 	const out: Profile = {};
@@ -62,7 +71,7 @@ function parseProfile(name: string, raw: unknown): Profile {
 	return out;
 }
 
-function parseGlobal(raw: unknown): ApneaConfig {
+export function parseGlobal(raw: unknown): ApneaConfig {
 	const o = assertObject(raw, "global config");
 	if (
 		"isolation" in o &&
@@ -109,10 +118,11 @@ function parseGlobal(raw: unknown): ApneaConfig {
 				? o.review_round_cap
 				: 3,
 		timeouts_ms: timeouts,
+		pane_style: parsePaneStyle(o.pane_style, "global config"),
 	};
 }
 
-function applyProject(cfg: ApneaConfig, raw: unknown): ApneaConfig {
+export function applyProject(cfg: ApneaConfig, raw: unknown): ApneaConfig {
 	if (raw == null) return cfg;
 	const o = assertObject(raw, "project config");
 	for (const key of Object.keys(o)) {
@@ -134,6 +144,7 @@ function applyProject(cfg: ApneaConfig, raw: unknown): ApneaConfig {
 		"review_round_cap",
 		"timeouts_ms",
 		"isolation",
+		"pane_style",
 	]);
 	for (const key of Object.keys(o)) {
 		if (!known.has(key)) {
@@ -172,6 +183,10 @@ function applyProject(cfg: ApneaConfig, raw: unknown): ApneaConfig {
 				? o.review_round_cap
 				: cfg.review_round_cap,
 		timeouts_ms: timeouts,
+		pane_style:
+			o.pane_style === undefined
+				? cfg.pane_style
+				: parsePaneStyle(o.pane_style, "project config"),
 	};
 }
 
