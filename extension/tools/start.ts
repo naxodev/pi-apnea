@@ -128,10 +128,16 @@ export function workflowStart(params: {
 	};
 	saveState(state, root);
 
-	return ok(`started run slug=${slug} vcs=${vcs} step=planning`, {
-		state,
-		profiles: Object.keys(cfg.profiles),
-		roles: cfg.roles,
-		note: "spawn role panes on first dispatch_role; cold roles use oneshot scripts",
-	});
+	return ok(
+		`started run slug=${slug} vcs=${vcs} step=planning. NEXT: dispatch_role kind=plan, then workflow_wait.`,
+		{
+			state,
+			profiles: Object.keys(cfg.profiles),
+			roles: cfg.roles,
+			next: "dispatch_role",
+			next_args: { kind: "plan" },
+			legal_next: ["dispatch_role", "workflow_status"],
+			note: "start only writes state — it does not launch roles. Orchestrator must dispatch plan immediately.",
+		},
+	);
 }

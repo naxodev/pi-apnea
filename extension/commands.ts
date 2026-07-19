@@ -45,6 +45,30 @@ function notify(
 	ctx.ui.notify(text, r.ok ? "info" : "error");
 }
 
+function orchestratorKickMessage(
+	kind: "start" | "resume",
+	goal?: string,
+): string {
+	if (kind === "start") {
+		return [
+			"You are the Apnea orchestrator for this run. Schedule only — no product code.",
+			goal ? `Goal: ${goal}` : null,
+			"State is step=planning with no pending dispatch.",
+			'Immediately call dispatch_role with kind="plan", then workflow_wait.',
+			"Then continue the loop: plan_review → phase_package → code → code_review → workflow_commit_phase → … → pr_description.",
+			"Use workflow_status if unsure. Never call workflow_reset_rounds. Escalate timeouts/caps/dirty-reviewer to the human.",
+		]
+			.filter(Boolean)
+			.join("\n");
+	}
+	return [
+		"You are the Apnea orchestrator resuming this run. Schedule only — no product code.",
+		"Call workflow_status (and workflow_start action=resume if needed).",
+		"If a pending artifact exists, workflow_wait. Else dispatch the legal kind for the current step.",
+		"Never auto-invent steps; never workflow_reset_rounds; never product code.",
+	].join("\n");
+}
+
 function parseFlags(tokens: string[]): { flags: Set<string>; rest: string[] } {
 	const flags = new Set<string>();
 	const rest: string[] = [];
@@ -70,6 +94,10 @@ function helpText(): string {
 }
 
 export function registerApneaCommands(pi: ExtensionAPI): void {
+	const kick = (kind: "start" | "resume", goal?: string) => {
+		pi.sendUserMessage(orchestratorKickMessage(kind, goal));
+	};
+
 	pi.registerCommand("apnea", {
 		description: "Apnea workflow: start, status, dispatch, wait, commit, …",
 		getArgumentCompletions: (prefix: string) => {
@@ -183,22 +211,24 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 							);
 							return;
 						}
-						notify(
-							ctx,
-							workflowStart({
-								goal,
-								slug,
-								allow_dirty:
-									flags.has("allow-dirty") || tokens.includes("--allow-dirty"),
-								action: "start",
-							}),
-						);
+						const r = workflowStart({
+							goal,
+							slug,
+							allow_dirty:
+								flags.has("allow-dirty") || tokens.includes("--allow-dirty"),
+							action: "start",
+						});
+						notify(ctx, r);
+						if (r.ok) kick("start", goal);
 						return;
 					}
 
-					case "resume":
-						notify(ctx, workflowStart({ goal: "", action: "resume" }));
+					case "resume": {
+						const r = workflowStart({ goal: "", action: "resume" });
+						notify(ctx, r);
+						if (r.ok) kick("resume");
 						return;
+					}
 
 					case "abandon":
 						notify(ctx, workflowStart({ goal: "", action: "abandon" }));
@@ -286,7 +316,9 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 				ctx.ui.notify("Usage: /apnea-start <goal>", "error");
 				return;
 			}
-			notify(ctx, workflowStart({ goal, action: "start" }));
+			const r = workflowStart({ goal, action: "start" });
+			notify(ctx, r);
+			if (r.ok) kick("start", goal);
 		},
 	});
 }

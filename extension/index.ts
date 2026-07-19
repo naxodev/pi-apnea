@@ -28,7 +28,7 @@ export default function (pi: ExtensionAPI) {
 		name: "workflow_start",
 		label: "Apnea start",
 		description:
-			"Start, resume, or abandon an Apnea run. Start refuses if state exists or tree dirty (unless allow_dirty). Resume never auto-dispatches.",
+			"Start, resume, or abandon an Apnea run. Start only writes state (step=planning) — it does NOT launch roles. After start succeeds you MUST immediately call dispatch_role kind=plan then workflow_wait. Resume never auto-dispatches. Refuses if state exists or tree dirty (unless allow_dirty).",
 		parameters: Type.Object({
 			goal: Type.Optional(
 				Type.String({ description: "Run goal (required for action=start)" }),

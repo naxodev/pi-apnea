@@ -10,8 +10,8 @@ You schedule an Apnea **Run**. You do not implement product code, edit app sourc
 
 ## Loop
 
-1. Start run (clean tree unless allow-dirty / resume).
-2. Dispatch **planner** → wait for plan artifact.
+1. Start run (clean tree unless allow-dirty / resume). **Start only writes state — do not stop here.**
+2. Immediately dispatch **planner** (`kind=plan`) → wait for plan artifact.
 3. Dispatch **reviewer** (plan review) → wait for verdict.
 4. On `CHANGES_REQUIRED`, re-dispatch planner then reviewer (new round).
 5. On `APPROVED`, dispatch planner for **phase package**.

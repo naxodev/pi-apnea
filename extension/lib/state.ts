@@ -6,7 +6,12 @@ export function loadState(root?: string): RunState | null {
 	const p = statePath(root);
 	if (!fs.existsSync(p)) return null;
 	try {
-		return JSON.parse(fs.readFileSync(p, "utf8")) as RunState;
+		const raw = JSON.parse(fs.readFileSync(p, "utf8")) as RunState;
+		// tolerate older state files missing pane-tracking fields
+		raw.pending_pane_id ??= null;
+		raw.pending_pane_label ??= null;
+		raw.role_panes ??= {};
+		return raw;
 	} catch (e) {
 		throw new Error(
 			`corrupt state at ${p}: ${e instanceof Error ? e.message : String(e)}`,
