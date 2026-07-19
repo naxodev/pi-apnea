@@ -73,8 +73,10 @@ export function apneaSetup(params: {
 	};
 
 	if (has.claude) {
-		// oneshot must be able to Write artifacts; toy gate used this exact set
+		// Interactive TUI only for Apnea dispatch (watchable in Herdr).
+		// cmd_oneshot kept optional for other tooling; Apnea does not use it.
 		profiles["claude-fable"] = {
+			cmd_interactive: ["claude", "--model", "claude-fable-5"],
 			cmd_oneshot: [
 				"claude",
 				"-p",
@@ -83,13 +85,12 @@ export function apneaSetup(params: {
 				"--allowedTools",
 				"Read,Write,Edit,Glob,Grep",
 			],
-			cmd_interactive: ["claude", "--model", "claude-fable-5"],
 		};
 	}
 	if (has.codex) {
 		profiles["codex"] = {
-			cmd_oneshot: ["codex", "exec"],
 			cmd_interactive: ["codex"],
+			cmd_oneshot: ["codex", "exec"],
 		};
 	}
 

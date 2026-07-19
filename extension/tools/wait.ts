@@ -6,12 +6,7 @@ import {
 	isCompleteArtifact,
 	readArtifact,
 } from "../lib/frontmatter.ts";
-import {
-	abs,
-	herdrEnabled,
-	paneGet,
-	sleep,
-} from "../lib/herdr-wait.ts";
+import { abs, herdrEnabled, paneGet, sleep } from "../lib/herdr-wait.ts";
 import { err, ok } from "../lib/result.ts";
 import {
 	assertToolAllowed,
@@ -19,11 +14,8 @@ import {
 	type DispatchKind,
 } from "../lib/state-machine.ts";
 import { requireState, saveState } from "../lib/state.ts";
-import type { Role, ToolResult } from "../lib/types.ts";
+import type { ToolResult } from "../lib/types.ts";
 import { treeFingerprint } from "../lib/vcs.ts";
-
-/** Roles that run as cold oneshot processes (exit when done). */
-const ONESHOT_ROLES: Role[] = ["planner", "reviewer"];
 
 function inferKind(artifactRel: string): DispatchKind {
 	if (artifactRel.endsWith("plan.md") && !artifactRel.includes("plan-review"))
@@ -122,17 +114,14 @@ export async function workflowWait(
 	const artifactAbs = abs(state.pending_artifact, root);
 	const kind = inferKind(state.pending_artifact);
 	const requireVerdict = kind === "plan_review" || kind === "code_review";
-	const isOneshot =
-		state.pending_role != null && ONESHOT_ROLES.includes(state.pending_role);
-
 	const deadline = Date.now() + timeout;
 	let lastStatus = "waiting";
-	let idleShellPolls = 0;
+	let shellOnlyPolls = 0;
 	const started = Date.now();
 	// grace: don't fail-fast until role has had a few seconds to start
-	const graceMs = 8_000;
-	// oneshot: after process is shell-only for this many polls, fail
-	const deadPollsNeeded = 3;
+	const graceMs = 12_000;
+	// if pane is bare shell (harness exited) without artifact for N polls → fail
+	const deadPollsNeeded = 4;
 
 	hooks.onUpdate?.({
 		content: [
@@ -216,7 +205,7 @@ export async function workflowWait(
 			});
 		}
 
-		// liveness + oneshot death detection
+		// liveness + harness-exited (shell-only) detection
 		if (herdrEnabled() && state.pending_pane_id) {
 			const info = paneGet(state.pending_pane_id);
 			if (!info.ok) {
@@ -236,31 +225,30 @@ export async function workflowWait(
 				}
 			} else {
 				lastStatus = info.agent_status ?? "unknown";
-				if (isOneshot && Date.now() - started > graceMs) {
-					// Death signal = foreground is only a shell (claude/pi process exited).
-					// Do NOT use agent_status alone — oneshot can report idle mid-run.
+				if (Date.now() - started > graceMs) {
+					// Death signal = foreground is only a shell (harness TUI exited).
 					const names = paneForegroundNames(state.pending_pane_id);
 					if (looksLikeShellOnly(names)) {
 						const again = readArtifact(artifactAbs);
 						if (!isCompleteArtifact(again, { requireVerdict })) {
-							idleShellPolls += 1;
-							if (idleShellPolls >= deadPollsNeeded) {
-								state.last_error = `oneshot role finished without artifact ${state.pending_artifact}`;
+							shellOnlyPolls += 1;
+							if (shellOnlyPolls >= deadPollsNeeded) {
+								state.last_error = `role pane shell-only without artifact ${state.pending_artifact}`;
 								saveState(state, root);
 								return err(
-									`oneshot ${state.pending_role} finished without writing ${state.pending_artifact}`,
+									`${state.pending_role} harness exited without writing ${state.pending_artifact}`,
 									{
 										data: {
 											last_agent_status: lastStatus,
 											foreground: names,
-											hint: "check profile allowedTools / pane output; re-dispatch same round",
+											hint: "check pane transcript; re-dispatch same round",
 										},
 									},
 								);
 							}
 						}
 					} else {
-						idleShellPolls = 0;
+						shellOnlyPolls = 0;
 					}
 				}
 			}

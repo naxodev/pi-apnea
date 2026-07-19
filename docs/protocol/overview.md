@@ -5,11 +5,11 @@
 | Role | Mode | Default job |
 |------|------|-------------|
 | **orchestrator** | interactive (Pi; tools only) | Drive the loop; no product code |
-| **planner** | oneshot | Plan, phase packages, final PR description |
-| **reviewer** | oneshot | Plan review + code review |
-| **coder** | interactive | Implement current phase package only |
+| **planner** | interactive TUI | Plan, phase packages, final PR description |
+| **reviewer** | interactive TUI | Plan review + code review |
+| **coder** | interactive TUI | Implement current phase package only |
 
-Mode is **owned by the role**, not the profile. Profiles must provide the matching command variant (`cmd_oneshot` / `cmd_interactive`).
+All worker roles open a **live harness TUI** in a Herdr pane (Claude / Pi / Codex / …). Dispatch never uses oneshot (`-p` / print) — that dumps shell output and is not watchable. Profiles must provide `cmd_interactive` for every role.
 
 ## State machine (`state.json.step`)
 
@@ -33,7 +33,7 @@ Illegal tool calls refuse with the legal next call named in the error.
 | Tool | Purpose |
 |------|---------|
 | `workflow_start` | Resolve config; clean-tree check (unless allow-dirty / resume); create git branch or prepare jj; label panes; write state |
-| `dispatch_role` | Write task file; set target artifact path; send pointer; rework-only round increment |
+| `dispatch_role` | Write task file; open live harness TUI in pane; wait idle; submit short pointer; rework-only round increment |
 | `workflow_wait` | Wait for artifact front-matter; treat agent-status as liveness only |
 | `workflow_commit_phase` | Require APPROVED + verify commands (log to `verify.log`) + VCS backend; advance phase |
 | `workflow_status` | **Read-only** snapshot |
@@ -68,8 +68,8 @@ Pane markers are human decoration. Herdr `agent_status` is liveness (dead pane /
 
 ## Rework
 
-- **Plan / review / planner PR:** always cold oneshot; pointer includes prior artifact paths.
-- **Coder:** live follow-up on same pane when possible; if pane missing → cold respawn with artifacts.
+- **All roles:** live follow-up on the same pane when the harness is still idle; if pane missing or busy → new pane + cold TUI launch, then pointer.
+- Pointer always includes prior artifact paths for context.
 - Round increments **only** after CHANGES_REQUIRED on the same (phase, gate).
 - Crash / timeout / resume: **same round number**, clear-before-dispatch on that path.
 

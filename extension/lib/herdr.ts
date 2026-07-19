@@ -1,5 +1,4 @@
 import { spawnSync } from "node:child_process";
-import * as fs from "node:fs";
 import * as path from "node:path";
 
 export function herdrEnabled(): boolean {
@@ -91,6 +90,11 @@ export function renamePane(paneId: string, label: string): void {
 	if (!r.ok) throw new Error(`herdr pane rename failed: ${r.raw}`);
 }
 
+/**
+ * Send text + Enter into a pane.
+ * When a live agent TUI is focused, this submits a prompt (not a shell command).
+ * When the pane is a bare shell, this runs a shell line.
+ */
 export function paneRun(paneId: string, command: string): void {
 	const r = herdr(["pane", "run", paneId, command]);
 	if (!r.ok) throw new Error(`herdr pane run failed: ${r.raw}`);
@@ -100,19 +104,17 @@ export function paneGet(paneId: string): {
 	ok: boolean;
 	agent_status?: string;
 	label?: string;
+	agent?: string;
 } {
 	const r = herdr(["pane", "get", paneId]);
 	if (!r.ok) return { ok: false };
 	const res = resultOf(r.json);
 	const pane = (res?.pane as Record<string, unknown>) ?? {};
-	// if herdr returned ok but no pane, treat as missing
-	if (!pane.pane_id && !pane.agent_status && !pane.label) {
-		// some responses still nest pane
-	}
 	return {
 		ok: true,
 		agent_status: pane.agent_status ? String(pane.agent_status) : undefined,
 		label: pane.label ? String(pane.label) : undefined,
+		agent: pane.agent ? String(pane.agent) : undefined,
 	};
 }
 
@@ -120,6 +122,39 @@ export function paneGet(paneId: string): {
 export function paneAlive(paneId: string): boolean {
 	const info = paneGet(paneId);
 	return info.ok;
+}
+
+/**
+ * Wait until agent reports idle or done (ready for a prompt).
+ * Uses herdr wait when available; falls back to poll.
+ */
+export function waitAgentReady(
+	paneId: string,
+	timeoutMs = 90_000,
+): string | undefined {
+	// Prefer Herdr's blocking wait (does not freeze our caller if we use it
+	// only for short readiness; dispatch is already a tool call).
+	const r = herdr([
+		"wait",
+		"agent-status",
+		paneId,
+		"--status",
+		"idle",
+		"--timeout",
+		String(timeoutMs),
+	]);
+	if (r.ok) {
+		const s = paneGet(paneId).agent_status;
+		if (s === "idle" || s === "done") return s;
+	}
+	// fall back: poll (done also counts as ready)
+	const deadline = Date.now() + Math.min(timeoutMs, 30_000);
+	while (Date.now() < deadline) {
+		const s = paneGet(paneId).agent_status;
+		if (s === "idle" || s === "done") return s;
+		spawnSync("sleep", ["0.5"]);
+	}
+	return paneGet(paneId).agent_status;
 }
 
 /** Unique label for a role slot (stable for the run when we reuse the pane). */
@@ -143,6 +178,7 @@ export function acquireRolePane(
 	role: string,
 	opts?: {
 		prefer?: RolePaneRef | null;
+		/** Launch interactive harness only when creating a new pane */
 		interactiveCmd?: string[];
 	},
 ): RolePaneRef & { reused: boolean } {
@@ -162,7 +198,15 @@ export function acquireRolePane(
 	const paneId = splitPane();
 	renamePane(paneId, label);
 	if (opts?.interactiveCmd?.length) {
-		const cmd = shellJoin(["cd", process.cwd(), "&&", ...opts.interactiveCmd]);
+		// Launch the interactive harness only (no task argv).
+		// cwd: herdr split inherits; also cd then exec so profile is in project.
+		const cmd = shellJoin([
+			"cd",
+			process.cwd(),
+			"&&",
+			"exec",
+			...opts.interactiveCmd,
+		]);
 		paneRun(paneId, cmd);
 	}
 	return { pane_id: paneId, label, reused: false };
@@ -171,57 +215,19 @@ export function acquireRolePane(
 export function shellJoin(parts: string[]): string {
 	return parts
 		.map((p) => {
-			if (p === "&&" || p === "|") return p;
+			if (p === "&&" || p === "|" || p === "exec") return p;
 			if (/^[A-Za-z0-9_./:=,@+-]+$/.test(p)) return p;
 			return `'${p.replace(/'/g, `'\\''`)}'`;
 		})
 		.join(" ");
 }
 
-function waitAgentReady(
-	paneId: string,
-	timeoutMs = 90_000,
-): string | undefined {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		const s = paneGet(paneId).agent_status;
-		if (s === "idle" || s === "done") return s;
-		spawnSync("sleep", ["1"]);
-	}
-	return paneGet(paneId).agent_status;
-}
-
-/** Oneshot: reuse shell pane if we have a live pane_id; else create. Always new process. */
-export function runOneshotInPane(
-	role: string,
-	cmd: string[],
-	taskFileAbs: string,
-	prefer?: RolePaneRef | null,
-): { pane_id: string; label: string; script: string; reused: boolean } {
-	const acquired = acquireRolePane(role, { prefer });
-	const scriptsDir = path.join(process.cwd(), ".apnea", "tasks");
-	fs.mkdirSync(scriptsDir, { recursive: true });
-	const script = path.join(scriptsDir, `run-${role}-${Date.now()}.sh`);
-	const cmdStr = shellJoin(cmd);
-	const body = `#!/usr/bin/env bash
-set -euo pipefail
-cd ${shellJoin([process.cwd()])}
-# stdin = task file so markdown never breaks argv
-exec ${cmdStr} < ${shellJoin([taskFileAbs])}
-`;
-	fs.writeFileSync(script, body, { mode: 0o755 });
-	paneRun(acquired.pane_id, script);
-	return {
-		pane_id: acquired.pane_id,
-		label: acquired.label,
-		script,
-		reused: acquired.reused,
-	};
-}
-
 /**
- * Interactive: reuse live pane if idle/done (follow-up prompt).
- * If missing or stuck working/blocked, spawn a new pane + agent.
+ * Open the interactive harness TUI in a pane (or reuse), wait until idle,
+ * then submit a short pointer prompt via `pane run` (text + Enter).
+ *
+ * This is the Herdr-recommended path: live agent you can watch, not
+ * `claude -p` / `pi -p` dumping shell output.
  */
 export function runInteractivePrompt(
 	role: string,
@@ -231,12 +237,13 @@ export function runInteractivePrompt(
 ): { pane_id: string; label: string; reused: boolean } {
 	let preferUse: RolePaneRef | null = null;
 	if (prefer?.pane_id && paneAlive(prefer.pane_id)) {
-		const st = paneGet(prefer.pane_id).agent_status;
-		// only reuse when agent can take a new prompt
-		if (st === "idle" || st === "done" || st === "unknown") {
+		const info = paneGet(prefer.pane_id);
+		const st = info.agent_status;
+		// reuse only when a live agent can take a new prompt
+		if (st === "idle" || st === "done") {
 			preferUse = prefer;
 		}
-		// if working/blocked, fall through to new pane
+		// working/blocked/unknown/shell-only → new pane
 	}
 
 	const acquired = acquireRolePane(role, {
@@ -245,29 +252,40 @@ export function runInteractivePrompt(
 	});
 
 	if (!acquired.reused) {
-		waitAgentReady(acquired.pane_id);
+		const ready = waitAgentReady(acquired.pane_id, 90_000);
+		if (ready !== "idle" && ready !== "done") {
+			// still try — some harnesses accept input before status settles
+		}
 	} else {
-		// ensure idle before follow-up
 		const st = paneGet(acquired.pane_id).agent_status;
-		if (st === "unknown") {
-			// shell without agent — launch interactive cmd
-			paneRun(
-				acquired.pane_id,
-				shellJoin(["cd", process.cwd(), "&&", ...interactiveCmd]),
-			);
-			waitAgentReady(acquired.pane_id);
-		} else if (st !== "idle" && st !== "done") {
-			// shouldn't happen given preferUse filter; wait briefly
+		if (st !== "idle" && st !== "done") {
 			waitAgentReady(acquired.pane_id, 30_000);
 		}
 	}
 
+	// Submit pointer into the live TUI (Herdr: pane run = text + Enter)
 	paneRun(acquired.pane_id, prompt);
 	return {
 		pane_id: acquired.pane_id,
 		label: acquired.label,
 		reused: acquired.reused,
 	};
+}
+
+/** @deprecated kept for any leftover imports — routes to interactive path. */
+export function runOneshotInPane(
+	role: string,
+	_cmd: string[],
+	taskFileAbs: string,
+	prefer?: RolePaneRef | null,
+): { pane_id: string; label: string; script: string; reused: boolean } {
+	// Should not be used; dispatch always goes interactive now.
+	// Fallback: open interactive cmd if we can resolve nothing else — caller
+	// should pass interactiveCmd instead. Here we only have oneshot cmd.
+	void prefer;
+	throw new Error(
+		`runOneshotInPane is disabled (observability). Use interactive TUI dispatch for role=${role} task=${path.basename(taskFileAbs)}`,
+	);
 }
 
 export function sleepMs(ms: number): void {

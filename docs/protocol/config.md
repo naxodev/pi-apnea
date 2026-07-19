@@ -48,15 +48,16 @@ Unknown keys and unimplemented values (`isolation: "worktree"`) **hard-error** a
 
 ## Role modes (fixed)
 
+Every worker role launches the **interactive** harness TUI so you can watch it in Herdr. `cmd_oneshot` may still exist in a profile for other tools, but Apnea dispatch does not use it.
+
 | Role | Required profile capability |
 |------|-----------------------------|
 | orchestrator | `cmd_interactive` |
-| planner | `cmd_oneshot` |
-| reviewer | `cmd_oneshot` |
+| planner | `cmd_interactive` |
+| reviewer | `cmd_interactive` |
 | coder | `cmd_interactive` |
-| pr-writer (planner) | `cmd_oneshot` |
 
-Binding a role to a profile missing the required variant → **hard-error**.
+Binding a role to a profile missing `cmd_interactive` → **hard-error**.
 
 ## Project config (no binaries)
 

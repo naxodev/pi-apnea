@@ -77,7 +77,7 @@ export default function (pi: ExtensionAPI) {
 		name: "dispatch_role",
 		label: "Apnea dispatch",
 		description:
-			"Write task file, clear target artifact path, launch role in Herdr pane (oneshot stdin or interactive prompt). Set rework=true only after CHANGES_REQUIRED.",
+			"Write task file, open interactive harness TUI in a Herdr pane, wait until idle, submit a short pointer prompt. Never oneshot/-p. Set rework=true only after CHANGES_REQUIRED.",
 		parameters: Type.Object({
 			kind: DispatchKind,
 			task_markdown: Type.Optional(
@@ -117,7 +117,7 @@ export default function (pi: ExtensionAPI) {
 		name: "workflow_wait",
 		label: "Apnea wait",
 		description:
-			"Wait for pending artifact front-matter (async; Esc-cancellable). Agent-status is liveness only; oneshot death without artifact fails fast. Advances state machine on success.",
+			"Wait for pending artifact front-matter (async; Esc-cancellable). Agent-status is liveness only; shell-only pane without artifact fails fast. Advances state machine on success.",
 		parameters: Type.Object({
 			timeout_ms: Type.Optional(Type.Number()),
 			poll_ms: Type.Optional(Type.Number()),
@@ -150,7 +150,7 @@ export default function (pi: ExtensionAPI) {
 											message: partial.content[0]?.text ?? "",
 										},
 									});
-							  }
+								}
 							: undefined,
 					},
 				),

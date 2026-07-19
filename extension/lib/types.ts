@@ -90,10 +90,15 @@ export interface ToolErr {
 
 export type ToolResult = ToolOk | ToolErr;
 
+/**
+ * All worker roles use interactive TUIs so you can watch them live in Herdr.
+ * Oneshot (`claude -p`, `pi -p`) is intentionally not used for dispatch:
+ * it dumps shell output and is not observable as a harness session.
+ */
 export const ROLE_MODE: Record<Role, RoleMode> = {
 	orchestrator: "interactive",
-	planner: "oneshot",
-	reviewer: "oneshot",
+	planner: "interactive",
+	reviewer: "interactive",
 	coder: "interactive",
 };
 

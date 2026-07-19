@@ -10,11 +10,7 @@ import {
 	rel,
 	tasksDir,
 } from "../lib/paths.ts";
-import {
-	herdrEnabled,
-	runInteractivePrompt,
-	runOneshotInPane,
-} from "../lib/herdr.ts";
+import { herdrEnabled, runInteractivePrompt } from "../lib/herdr.ts";
 import { err, ok } from "../lib/result.ts";
 import {
 	allowedKinds,
@@ -257,8 +253,7 @@ export function workflowDispatch(params: {
 		state.reviewer_tree_fingerprint = treeFingerprint(root, state.vcs);
 	}
 
-	const mode = ROLE_MODE[role];
-	let launch: Record<string, unknown> = { mode };
+	let launch: Record<string, unknown> = { mode: ROLE_MODE[role] };
 
 	if (!state.role_panes) state.role_panes = {};
 
@@ -283,36 +278,28 @@ export function workflowDispatch(params: {
 	const prefer = state.role_panes[role] ?? null;
 
 	try {
-		if (mode === "oneshot") {
-			const cmd = resolveRoleCmd(cfg, role, "oneshot");
-			const r = runOneshotInPane(role, cmd, taskFile, prefer);
-			launch = {
-				mode,
-				pane_id: r.pane_id,
-				label: r.label,
-				reused: r.reused,
-				script: rel(r.script, root),
-				cmd,
-			};
-			state.pending_pane_id = r.pane_id;
-			state.pending_pane_label = r.label;
-			state.role_panes[role] = { pane_id: r.pane_id, label: r.label };
-		} else {
-			const cmd = resolveRoleCmd(cfg, role, "interactive");
-			const prompt = `Read ${rel(taskFile, root)} and execute it fully. Write the artifact at ${artifactRel}. Follow the brief. Do not commit.`;
-			const r = runInteractivePrompt(role, cmd, prompt, prefer);
-			launch = {
-				mode,
-				pane_id: r.pane_id,
-				label: r.label,
-				reused: r.reused,
-				cmd,
-				prompt,
-			};
-			state.pending_pane_id = r.pane_id;
-			state.pending_pane_label = r.label;
-			state.role_panes[role] = { pane_id: r.pane_id, label: r.label };
-		}
+		// Always interactive TUI: open harness, wait idle, submit pointer via pane run.
+		// Never oneshot (`-p`) — that dumps shell output and is not watchable.
+		const cmd = resolveRoleCmd(cfg, role, "interactive");
+		const prompt = [
+			`You are the ${role}.`,
+			`Read brief: ${briefAbs}`,
+			`Read task: ${rel(taskFile, root)}`,
+			`Write artifact exactly at: ${artifactRel}`,
+			"Follow the brief. Do not invent paths. Do not commit. Do not edit .apnea/state.json.",
+		].join("\n");
+		const r = runInteractivePrompt(role, cmd, prompt, prefer);
+		launch = {
+			mode: "interactive",
+			pane_id: r.pane_id,
+			label: r.label,
+			reused: r.reused,
+			cmd,
+			prompt,
+		};
+		state.pending_pane_id = r.pane_id;
+		state.pending_pane_label = r.label;
+		state.role_panes[role] = { pane_id: r.pane_id, label: r.label };
 	} catch (e) {
 		return err(e instanceof Error ? e.message : String(e), {
 			data: { task: rel(taskFile, root), artifact: artifactRel },
