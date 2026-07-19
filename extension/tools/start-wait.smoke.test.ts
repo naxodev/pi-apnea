@@ -35,27 +35,38 @@ function gitRepo(): string {
 
 describe("workflow smoke", () => {
 	test("start, status, double-start refuse, illegal commit", () => {
+		// This suite asserts the no-Herdr path; strip ambient HERDR_ENV from the
+		// orchestrator pane so dispatch does not open live role panes mid-test.
+		const prevHerdr = process.env.HERDR_ENV;
+		delete process.env.HERDR_ENV;
 		const d = gitRepo();
 		process.chdir(d);
 
-		const s = workflowStart({ goal: "smoke test feature", slug: "smoke" });
-		expect(s.ok).toBe(true);
-		if (s.ok) expect(s.data?.state).toBeDefined();
+		try {
+			const s = workflowStart({ goal: "smoke test feature", slug: "smoke" });
+			expect(s.ok).toBe(true);
+			if (s.ok) expect(s.data?.state).toBeDefined();
 
-		const st = workflowStatus();
-		expect(st.ok).toBe(true);
+			const st = workflowStatus();
+			expect(st.ok).toBe(true);
 
-		const again = workflowStart({ goal: "nope" });
-		expect(again.ok).toBe(false);
+			const again = workflowStart({ goal: "nope" });
+			expect(again.ok).toBe(false);
 
-		const commit = workflowCommitPhase({});
-		expect(commit.ok).toBe(false);
+			const commit = workflowCommitPhase({});
+			expect(commit.ok).toBe(false);
 
-		// dispatch without herdr still writes task
-		const disp = workflowDispatch({ kind: "plan" });
-		expect(disp.ok).toBe(true);
-		if (disp.ok) {
-			expect(fs.existsSync(path.join(d, String(disp.data?.task)))).toBe(true);
+			// dispatch without herdr still writes task
+			const disp = workflowDispatch({ kind: "plan" });
+			expect(disp.ok).toBe(true);
+			if (disp.ok) {
+				expect(fs.existsSync(path.join(d, String(disp.data?.task)))).toBe(
+					true,
+				);
+			}
+		} finally {
+			if (prevHerdr === undefined) delete process.env.HERDR_ENV;
+			else process.env.HERDR_ENV = prevHerdr;
 		}
 	});
 });

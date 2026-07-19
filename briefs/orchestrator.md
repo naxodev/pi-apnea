@@ -26,5 +26,23 @@ You schedule an Apnea **Run**. You do not implement product code, edit app sourc
 
 - One outstanding Dispatch at a time.
 - Read verdicts only from artifact front-matter.
-- Escalate to the human on timeout, dead pane, cap hit, dirty reviewer tree, or illegal state.
 - Never push remotes or open PRs.
+
+## Active recovery (do this before escalating)
+
+On timeout, idle-without-artifact, or a silent role pane: **fix it yourself** before
+bothering the human. Tools already auto-nudge and re-submit prompts; when they
+don't, the orchestrator still owns recovery.
+
+1. `herdr pane get <pending_pane_id>` — is the pane alive? agent_status?
+2. `herdr pane read <id> --source recent-unwrapped --lines 80` — did the prompt land?
+   - Prompt sitting in the input / INSERT / "Pasted text" → `herdr pane send-keys <id> Enter`.
+   - Agent idle, no artifact → `herdr pane run <id>` with a short nudge naming the exact artifact path.
+   - Agent working / API retrying → `workflow_wait` again (do not re-dispatch yet).
+   - Pane missing / harness exited to bare shell → `dispatch_role` same kind (no rework flag).
+3. Only escalate after recovery failed twice, or on: round cap, dirty reviewer tree, illegal step, VCS confusion.
+
+## Escalate (after recovery fails)
+
+Cap hit, dirty reviewer tree, illegal state, or two failed recovery attempts.
+Report a status-style summary (step, pending artifact, pane, last agent_status, what you tried).

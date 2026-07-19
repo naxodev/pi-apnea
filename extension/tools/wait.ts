@@ -6,7 +6,13 @@ import {
 	isCompleteArtifact,
 	readArtifact,
 } from "../lib/frontmatter.ts";
-import { abs, herdrEnabled, paneGet, sleep } from "../lib/herdr-wait.ts";
+import {
+	abs,
+	herdrEnabled,
+	paneGet,
+	paneRun,
+	sleep,
+} from "../lib/herdr-wait.ts";
 import { err, ok } from "../lib/result.ts";
 import {
 	assertToolAllowed,
@@ -14,7 +20,7 @@ import {
 	type DispatchKind,
 } from "../lib/state-machine.ts";
 import { requireState, saveState } from "../lib/state.ts";
-import type { ToolResult } from "../lib/types.ts";
+import type { FrontMatter, RunState, ToolResult } from "../lib/types.ts";
 import { treeFingerprint } from "../lib/vcs.ts";
 
 function inferKind(artifactRel: string): DispatchKind {
@@ -68,6 +74,72 @@ function looksLikeShellOnly(names: string[]): boolean {
 	});
 }
 
+function advanceOnComplete(
+	state: RunState,
+	root: string,
+	kind: DispatchKind,
+	fm: FrontMatter,
+	artifactAbs: string,
+	msg = "artifact ready",
+): ToolResult {
+	if (
+		state.pending_role === "reviewer" &&
+		state.reviewer_tree_fingerprint != null
+	) {
+		const now = treeFingerprint(root, state.vcs);
+		if (now !== state.reviewer_tree_fingerprint) {
+			state.last_error = "reviewer dirtied file tree";
+			saveState(state, root);
+			return err(
+				"reviewer dirty-tree detection: file content changed during review — escalate to human",
+				{
+					data: {
+						before: state.reviewer_tree_fingerprint,
+						after: now,
+						artifact: state.pending_artifact,
+					},
+				},
+			);
+		}
+	}
+
+	const next = stepAfterArtifact(kind, fm.verdict);
+	if (typeof next === "object") {
+		return err(next.error, { data: { artifact: state.pending_artifact } });
+	}
+
+	if (kind === "phase_package") {
+		state.current_phase_package = state.pending_artifact;
+	}
+	if (kind === "code_review") {
+		state.current_code_review = state.pending_artifact;
+	}
+
+	const verdict = asVerdict(fm.verdict);
+	state.step = next;
+	state.pending_artifact = null;
+	state.pending_role = null;
+	state.pending_pane_id = null;
+	state.pending_pane_label = null;
+	state.reviewer_tree_fingerprint = null;
+	state.last_error = null;
+	saveState(state, root);
+
+	return ok(`${msg}; step → ${next}`, {
+		artifact: path.relative(root, artifactAbs),
+		kind,
+		verdict,
+		nits: fm.nits ?? null,
+		step: next,
+		legal_next:
+			next === "committing"
+				? ["workflow_commit_phase"]
+				: next === "done"
+					? ["workflow_status"]
+					: ["dispatch_role", "workflow_status"],
+	});
+}
+
 export type WaitParams = {
 	timeout_ms?: number;
 	poll_ms?: number;
@@ -83,6 +155,11 @@ export type WaitHooks = {
 /**
  * Async wait — yields the event loop between polls so Pi stays responsive
  * and Esc (AbortSignal) can cancel.
+ *
+ * Recovery (does not immediately escalate):
+ * - idle/done without artifact for ≥90s → one nudge prompt into the role pane
+ * - still working/blocked at timeout → extend budget once by max(50%, 2m)
+ * - idle at final timeout and never nudged → final nudge + 3m grace
  */
 export async function workflowWait(
 	params: WaitParams,
@@ -114,25 +191,54 @@ export async function workflowWait(
 	const artifactAbs = abs(state.pending_artifact, root);
 	const kind = inferKind(state.pending_artifact);
 	const requireVerdict = kind === "plan_review" || kind === "code_review";
-	const deadline = Date.now() + timeout;
+	let deadline = Date.now() + timeout;
 	let lastStatus = "waiting";
 	let shellOnlyPolls = 0;
 	const started = Date.now();
-	// grace: don't fail-fast until role has had a few seconds to start
 	const graceMs = 12_000;
-	// if pane is bare shell (harness exited) without artifact for N polls → fail
 	const deadPollsNeeded = 4;
+	const idleNudgeAfterMs = 90_000;
+	let idleSince: number | null = null;
+	let nudged = false;
+	let extendedOnce = false;
+	let finalNudgeGrace = false;
+	const pendingArtifact = state.pending_artifact;
+	const nudgePrompt =
+		`You appear idle without writing the required artifact.\n` +
+		`Write it now exactly at: ${pendingArtifact}\n` +
+		`Front-matter must include status: done` +
+		(requireVerdict ? ` and verdict: APPROVED | CHANGES_REQUIRED` : "") +
+		`. Follow the brief and task file. Do not invent paths.`;
+
+	const tryNudge = (why: string): void => {
+		if (nudged || !herdrEnabled() || !state.pending_pane_id) return;
+		nudged = true;
+		try {
+			paneRun(state.pending_pane_id, nudgePrompt);
+			hooks.onUpdate?.({
+				content: [
+					{
+						type: "text",
+						text: `${why} — nudged ${state.pending_role} to write ${pendingArtifact}`,
+					},
+				],
+			});
+		} catch {
+			/* best-effort recovery */
+		}
+		idleSince = Date.now();
+	};
 
 	hooks.onUpdate?.({
 		content: [
 			{
 				type: "text",
-				text: `waiting for ${state.pending_artifact} (timeout ${Math.round(timeout / 1000)}s)…`,
+				text: `waiting for ${pendingArtifact} (timeout ${Math.round(timeout / 1000)}s)…`,
 			},
 		],
 	});
 
-	while (Date.now() < deadline) {
+	while (true) {
 		if (hooks.signal?.aborted) {
 			state.last_error = "workflow_wait aborted";
 			saveState(state, root);
@@ -147,74 +253,25 @@ export async function workflowWait(
 
 		const fm = readArtifact(artifactAbs);
 		if (isCompleteArtifact(fm, { requireVerdict })) {
-			if (
-				state.pending_role === "reviewer" &&
-				state.reviewer_tree_fingerprint != null
-			) {
-				const now = treeFingerprint(root, state.vcs);
-				if (now !== state.reviewer_tree_fingerprint) {
-					state.last_error = "reviewer dirtied file tree";
-					saveState(state, root);
-					return err(
-						"reviewer dirty-tree detection: file content changed during review — escalate to human",
-						{
-							data: {
-								before: state.reviewer_tree_fingerprint,
-								after: now,
-								artifact: state.pending_artifact,
-							},
-						},
-					);
-				}
-			}
-
-			const next = stepAfterArtifact(kind, fm!.verdict);
-			if (typeof next === "object") {
-				return err(next.error, { data: { artifact: state.pending_artifact } });
-			}
-
-			if (kind === "phase_package") {
-				state.current_phase_package = state.pending_artifact;
-			}
-			if (kind === "code_review") {
-				state.current_code_review = state.pending_artifact;
-			}
-
-			const verdict = asVerdict(fm!.verdict);
-			state.step = next;
-			state.pending_artifact = null;
-			state.pending_role = null;
-			state.pending_pane_id = null;
-			state.pending_pane_label = null;
-			state.reviewer_tree_fingerprint = null;
-			state.last_error = null;
-			saveState(state, root);
-
-			return ok(`artifact ready; step → ${next}`, {
-				artifact: path.relative(root, artifactAbs),
+			return advanceOnComplete(
+				state,
+				root,
 				kind,
-				verdict,
-				nits: fm!.nits ?? null,
-				step: next,
-				legal_next:
-					next === "committing"
-						? ["workflow_commit_phase"]
-						: next === "done"
-							? ["workflow_status"]
-							: ["dispatch_role", "workflow_status"],
-			});
+				fm!,
+				artifactAbs,
+				nudged ? "artifact ready after nudge" : "artifact ready",
+			);
 		}
 
-		// liveness + harness-exited (shell-only) detection
 		if (herdrEnabled() && state.pending_pane_id) {
 			const info = paneGet(state.pending_pane_id);
 			if (!info.ok) {
 				lastStatus = "pane_missing";
 				if (Date.now() - started > graceMs) {
-					state.last_error = `role pane missing while waiting for ${state.pending_artifact}`;
+					state.last_error = `role pane missing while waiting for ${pendingArtifact}`;
 					saveState(state, root);
 					return err(
-						`role pane gone and artifact incomplete: ${state.pending_artifact}`,
+						`role pane gone and artifact incomplete: ${pendingArtifact}`,
 						{
 							data: {
 								last_agent_status: lastStatus,
@@ -225,18 +282,30 @@ export async function workflowWait(
 				}
 			} else {
 				lastStatus = info.agent_status ?? "unknown";
+
+				if (lastStatus === "idle" || lastStatus === "done") {
+					if (idleSince == null) idleSince = Date.now();
+					else if (
+						Date.now() - idleSince >= idleNudgeAfterMs &&
+						Date.now() - started > graceMs
+					) {
+						tryNudge("idle stall");
+					}
+				} else {
+					idleSince = null;
+				}
+
 				if (Date.now() - started > graceMs) {
-					// Death signal = foreground is only a shell (harness TUI exited).
 					const names = paneForegroundNames(state.pending_pane_id);
 					if (looksLikeShellOnly(names)) {
 						const again = readArtifact(artifactAbs);
 						if (!isCompleteArtifact(again, { requireVerdict })) {
 							shellOnlyPolls += 1;
 							if (shellOnlyPolls >= deadPollsNeeded) {
-								state.last_error = `role pane shell-only without artifact ${state.pending_artifact}`;
+								state.last_error = `role pane shell-only without artifact ${pendingArtifact}`;
 								saveState(state, root);
 								return err(
-									`${state.pending_role} harness exited without writing ${state.pending_artifact}`,
+									`${state.pending_role} harness exited without writing ${pendingArtifact}`,
 									{
 										data: {
 											last_agent_status: lastStatus,
@@ -254,12 +323,48 @@ export async function workflowWait(
 			}
 		}
 
+		if (Date.now() >= deadline) {
+			// Still working: extend once.
+			if (
+				!extendedOnce &&
+				(lastStatus === "working" || lastStatus === "blocked")
+			) {
+				extendedOnce = true;
+				const extra = Math.max(Math.floor(timeout * 0.5), 120_000);
+				deadline = Date.now() + extra;
+				hooks.onUpdate?.({
+					content: [
+						{
+							type: "text",
+							text: `agent still ${lastStatus} at timeout — extending ${Math.round(extra / 1000)}s once…`,
+						},
+					],
+				});
+				continue;
+			}
+
+			// Idle and never nudged: final nudge + short grace.
+			if (
+				!finalNudgeGrace &&
+				!nudged &&
+				(lastStatus === "idle" || lastStatus === "done") &&
+				state.pending_pane_id
+			) {
+				finalNudgeGrace = true;
+				tryNudge("timeout idle");
+				deadline = Date.now() + 180_000;
+				continue;
+			}
+
+			break;
+		}
+
 		const elapsed = Math.round((Date.now() - started) / 1000);
 		hooks.onUpdate?.({
 			content: [
 				{
 					type: "text",
-					text: `waiting ${elapsed}s for ${state.pending_artifact} (agent=${lastStatus})…`,
+					text: `waiting ${elapsed}s for ${pendingArtifact} (agent=${lastStatus})…`,
 				},
 			],
 		});
@@ -278,15 +383,14 @@ export async function workflowWait(
 		}
 	}
 
-	state.last_error = `timeout waiting for ${state.pending_artifact}`;
+	state.last_error = `timeout waiting for ${pendingArtifact}`;
 	saveState(state, root);
-	return err(
-		`timeout after ${timeout}ms waiting for ${state.pending_artifact}`,
-		{
-			data: {
-				last_agent_status: lastStatus,
-				hint: "escalate to human; re-dispatch same round after investigate",
-			},
+	return err(`timeout after ${timeout}ms waiting for ${pendingArtifact}`, {
+		data: {
+			last_agent_status: lastStatus,
+			nudged,
+			extended_once: extendedOnce,
+			hint: "inspect pane transcript; re-dispatch same round or nudge via herdr pane run",
 		},
-	);
+	});
 }

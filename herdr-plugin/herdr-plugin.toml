@@ -1,0 +1,12 @@
+id = "apnea"
+name = "Apnea"
+version = "0.1.0"
+description = "Apnea floating-pane worker for oneshot role dispatches."
+min_herdr_version = "0.7.4"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "worker"
+title = "Apnea worker"
+placement = "popup"
+command = ["bash", "scripts/run-task.sh"]

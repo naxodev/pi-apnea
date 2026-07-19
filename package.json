@@ -20,7 +20,8 @@
     "skills",
     "prompts",
     "examples",
-    "extension"
+    "extension",
+    "herdr-plugin"
   ],
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.10",

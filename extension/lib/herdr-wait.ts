@@ -3,6 +3,8 @@ export {
 	herdrEnabled,
 	paneGet,
 	paneAlive,
+	paneRun,
+	paneSendKeys,
 	sleepMs,
 } from "./herdr.ts";
 export { abs } from "./paths.ts";

@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import * as path from "node:path";
+import * as fs from "node:fs";
+import type { PaneStyle, Role } from "./types.ts";
 
 export function herdrEnabled(): boolean {
 	return process.env.HERDR_ENV === "1";
@@ -98,6 +99,73 @@ export function renamePane(paneId: string, label: string): void {
 export function paneRun(paneId: string, command: string): void {
 	const r = herdr(["pane", "run", paneId, command]);
 	if (!r.ok) throw new Error(`herdr pane run failed: ${r.raw}`);
+}
+
+/** Send raw key names (e.g. Escape, Enter) into a pane. */
+export function paneSendKeys(paneId: string, keys: string[]): void {
+	if (keys.length === 0) return;
+	const r = herdr(["pane", "send-keys", paneId, ...keys]);
+	if (!r.ok) throw new Error(`herdr pane send-keys failed: ${r.raw}`);
+}
+
+/**
+ * After submitting a prompt, confirm the agent actually started working.
+ * Claude often parks multi-line paste in the input without submitting;
+ * pi+vim can leave the prompt in INSERT mode. Recover with Enter (then
+ * one full re-submit) before giving up.
+ */
+export function ensurePromptSubmitted(
+	paneId: string,
+	prompt: string,
+	opts?: { settleMs?: number; workingWaitMs?: number },
+): { accepted: boolean; attempts: number; last_status?: string } {
+	const settleMs = opts?.settleMs ?? 2500;
+	const workingWaitMs = opts?.workingWaitMs ?? 12_000;
+	let attempts = 1;
+
+	const waitForWorking = (ms: number): string | undefined => {
+		const deadline = Date.now() + ms;
+		while (Date.now() < deadline) {
+			const s = paneGet(paneId).agent_status;
+			if (s === "working" || s === "blocked") return s;
+			sleepMs(400);
+		}
+		return paneGet(paneId).agent_status;
+	};
+
+	// Give the first paneRun a moment to flip status.
+	sleepMs(settleMs);
+	let status = waitForWorking(workingWaitMs);
+	if (status === "working" || status === "blocked") {
+		return { accepted: true, attempts, last_status: status };
+	}
+
+	// Paste often lands without submit — Enter alone recovers Claude.
+	attempts += 1;
+	try {
+		paneSendKeys(paneId, ["Enter"]);
+	} catch {
+		/* pane may have died */
+	}
+	status = waitForWorking(workingWaitMs);
+	if (status === "working" || status === "blocked") {
+		return { accepted: true, attempts, last_status: status };
+	}
+
+	// Full re-submit once (covers lost/mangled first paste).
+	attempts += 1;
+	try {
+		paneRun(paneId, prompt);
+	} catch {
+		return { accepted: false, attempts, last_status: paneGet(paneId).agent_status };
+	}
+	sleepMs(settleMs);
+	status = waitForWorking(workingWaitMs);
+	return {
+		accepted: status === "working" || status === "blocked",
+		attempts,
+		last_status: status,
+	};
 }
 
 export function paneGet(paneId: string): {
@@ -234,7 +302,14 @@ export function runInteractivePrompt(
 	interactiveCmd: string[],
 	prompt: string,
 	prefer?: RolePaneRef | null,
-): { pane_id: string; label: string; reused: boolean } {
+): {
+	pane_id: string;
+	label: string;
+	reused: boolean;
+	prompt_accepted: boolean;
+	prompt_attempts: number;
+	last_status?: string;
+} {
 	let preferUse: RolePaneRef | null = null;
 	if (prefer?.pane_id && paneAlive(prefer.pane_id)) {
 		const info = paneGet(prefer.pane_id);
@@ -263,29 +338,129 @@ export function runInteractivePrompt(
 		}
 	}
 
-	// Submit pointer into the live TUI (Herdr: pane run = text + Enter)
+	// Submit pointer into the live TUI (Herdr: pane run = text + Enter),
+	// then confirm the agent actually started — do not trust fire-and-forget.
 	paneRun(acquired.pane_id, prompt);
+	const submit = ensurePromptSubmitted(acquired.pane_id, prompt);
 	return {
 		pane_id: acquired.pane_id,
 		label: acquired.label,
 		reused: acquired.reused,
+		prompt_accepted: submit.accepted,
+		prompt_attempts: submit.attempts,
+		last_status: submit.last_status,
 	};
 }
 
-/** @deprecated kept for any leftover imports — routes to interactive path. */
-export function runOneshotInPane(
-	role: string,
-	_cmd: string[],
-	taskFileAbs: string,
-	prefer?: RolePaneRef | null,
-): { pane_id: string; label: string; script: string; reused: boolean } {
-	// Should not be used; dispatch always goes interactive now.
-	// Fallback: open interactive cmd if we can resolve nothing else — caller
-	// should pass interactiveCmd instead. Here we only have oneshot cmd.
-	void prefer;
-	throw new Error(
-		`runOneshotInPane is disabled (observability). Use interactive TUI dispatch for role=${role} task=${path.basename(taskFileAbs)}`,
-	);
+/** Parse `herdr X.Y.Z` (or noisy multi-line) into a numeric tuple. */
+export function parseHerdrVersion(
+	raw: string,
+): [number, number, number] | null {
+	const m = raw.match(/(\d+)\.(\d+)\.(\d+)/);
+	if (!m) return null;
+	return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+export function versionGte(
+	a: [number, number, number],
+	b: [number, number, number],
+): boolean {
+	const [a0, a1, a2] = a;
+	const [b0, b1, b2] = b;
+	if (a0 !== b0) return a0 > b0;
+	if (a1 !== b1) return a1 > b1;
+	return a2 >= b2;
+}
+
+/** Run `herdr --version` (plain text, not JSON). */
+export function herdrVersion(): [number, number, number] | null {
+	const r = herdr(["--version"]);
+	return parseHerdrVersion(r.raw);
+}
+
+/**
+ * Floating popups need herdr ≥ 0.7.4. Fail closed on unparseable versions so an
+ * unattended run never hangs on a CLI that rejects `--placement popup`.
+ */
+export function supportsFloating(
+	version: [number, number, number] | null = herdrVersion(),
+): boolean {
+	return version != null && versionGte(version, [0, 7, 4]);
+}
+
+/** True iff the linked `apnea` herdr plugin is present. */
+export function hasApneaPlugin(): boolean {
+	const r = herdr(["plugin", "list", "--plugin", "apnea", "--json"]);
+	const json = r.json;
+	if (json) {
+		const res = resultOf(json);
+		const plugins = (res?.plugins as Array<Record<string, unknown>>) ?? [];
+		if (
+			plugins.some(
+				(p) =>
+					p.plugin_id === "apnea" || p.id === "apnea" || p.name === "Apnea",
+			)
+		) {
+			return true;
+		}
+	}
+	// Fallback when JSON shape is unexpected but the id still appears in output.
+	return /"(?:plugin_id|id)"\s*:\s*"apnea"/.test(r.raw);
+}
+
+/** Write a self-contained bash script that cds to root and execs cmd + prompt. */
+export function writeFloatingTaskScript(
+	scriptAbs: string,
+	root: string,
+	cmd: string[],
+	prompt: string,
+): void {
+	const body = [
+		"#!/usr/bin/env bash",
+		"set -euo pipefail",
+		shellJoin(["cd", root]),
+		shellJoin(["exec", ...cmd, prompt]),
+		"",
+	].join("\n");
+	fs.writeFileSync(scriptAbs, body, "utf8");
+	fs.chmodSync(scriptAbs, 0o755);
+}
+
+/** Open the apnea worker popup; popups have no pane id. */
+export function openFloatingPane(taskScriptAbs: string, root: string): void {
+	const r = herdr([
+		"plugin",
+		"pane",
+		"open",
+		"--plugin",
+		"apnea",
+		"--entrypoint",
+		"worker",
+		"--placement",
+		"popup",
+		"--cwd",
+		root,
+		"--env",
+		`APNEA_TASK_SCRIPT=${taskScriptAbs}`,
+	]);
+	if (!r.ok) throw new Error(`herdr plugin pane open failed: ${r.raw}`);
+}
+
+/**
+ * Configured style vs effective style. Floating is only for planner/reviewer
+ * (oneshot-eligible artifact producers); interactive roles always stay regular.
+ */
+export function effectivePaneStyle(
+	configured: PaneStyle,
+	role: Role,
+): { style: PaneStyle; effective: string } {
+	if (configured === "regular") {
+		return { style: "regular", effective: "regular" };
+	}
+	if (role === "planner" || role === "reviewer") {
+		return { style: "floating", effective: "floating" };
+	}
+	return { style: "regular", effective: "regular (interactive role)" };
 }
 
 export function sleepMs(ms: number): void {

@@ -10,7 +10,15 @@ import {
 	rel,
 	tasksDir,
 } from "../lib/paths.ts";
-import { herdrEnabled, runInteractivePrompt } from "../lib/herdr.ts";
+import {
+	effectivePaneStyle,
+	hasApneaPlugin,
+	herdrEnabled,
+	openFloatingPane,
+	runInteractivePrompt,
+	supportsFloating,
+	writeFloatingTaskScript,
+} from "../lib/herdr.ts";
 import { err, ok } from "../lib/result.ts";
 import {
 	allowedKinds,
@@ -253,9 +261,19 @@ export function workflowDispatch(params: {
 		state.reviewer_tree_fingerprint = treeFingerprint(root, state.vcs);
 	}
 
+	const paneStyle = effectivePaneStyle(cfg.pane_style, role);
+	const prompt = [
+		`You are the ${role}.`,
+		`Read brief: ${briefAbs}`,
+		`Read task: ${rel(taskFile, root)}`,
+		`Write artifact exactly at: ${artifactRel}`,
+		"Follow the brief. Do not invent paths. Do not commit. Do not edit .apnea/state.json.",
+	].join("\n");
+
 	let launch: Record<string, unknown> = {
 		mode: ROLE_MODE[role],
 		pane_style: cfg.pane_style,
+		pane_style_effective: paneStyle.effective,
 	};
 
 	if (!state.role_panes) state.role_panes = {};
@@ -279,36 +297,73 @@ export function workflowDispatch(params: {
 		);
 	}
 
-	const prefer = state.role_panes[role] ?? null;
-
-	try {
-		// Always interactive TUI: open harness, wait idle, submit pointer via pane run.
-		// Never oneshot (`-p`) — that dumps shell output and is not watchable.
-		const cmd = resolveRoleCmd(cfg, role, "interactive");
-		const prompt = [
-			`You are the ${role}.`,
-			`Read brief: ${briefAbs}`,
-			`Read task: ${rel(taskFile, root)}`,
-			`Write artifact exactly at: ${artifactRel}`,
-			"Follow the brief. Do not invent paths. Do not commit. Do not edit .apnea/state.json.",
-		].join("\n");
-		const r = runInteractivePrompt(role, cmd, prompt, prefer);
+	if (paneStyle.style === "floating") {
+		if (!supportsFloating()) {
+			return err(
+				"floating panes need herdr >= 0.7.4 — run `herdr update`, or set pane_style=regular",
+			);
+		}
+		if (!hasApneaPlugin()) {
+			return err(
+				`apnea herdr plugin not linked. Run /apnea setup, or: herdr plugin link ${state.package_root}/herdr-plugin`,
+			);
+		}
+		let cmd: string[];
+		try {
+			cmd = resolveRoleCmd(cfg, role, "oneshot");
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : String(e);
+			return err(
+				`floating dispatch requires cmd_oneshot on the role profile: ${msg}`,
+			);
+		}
+		const scriptAbs = taskFile.replace(/\.md$/, ".sh");
+		try {
+			writeFloatingTaskScript(scriptAbs, root, cmd, prompt);
+			openFloatingPane(scriptAbs, root);
+		} catch (e) {
+			return err(e instanceof Error ? e.message : String(e), {
+				data: { task: rel(taskFile, root), artifact: artifactRel },
+			});
+		}
+		// Popups have no pane id — wait is artifact-only; leave role_panes alone.
+		state.pending_pane_id = null;
+		state.pending_pane_label = null;
 		launch = {
-			mode: "interactive",
-			pane_id: r.pane_id,
-			label: r.label,
-			reused: r.reused,
+			mode: "oneshot",
+			pane_style: cfg.pane_style,
+			pane_style_effective: "floating",
+			script: rel(scriptAbs, root),
 			cmd,
 			prompt,
-			pane_style: cfg.pane_style,
 		};
-		state.pending_pane_id = r.pane_id;
-		state.pending_pane_label = r.label;
-		state.role_panes[role] = { pane_id: r.pane_id, label: r.label };
-	} catch (e) {
-		return err(e instanceof Error ? e.message : String(e), {
-			data: { task: rel(taskFile, root), artifact: artifactRel },
-		});
+	} else {
+		const prefer = state.role_panes[role] ?? null;
+		try {
+			// Interactive TUI: open harness, wait idle, submit pointer via pane run.
+			const cmd = resolveRoleCmd(cfg, role, "interactive");
+			const r = runInteractivePrompt(role, cmd, prompt, prefer);
+			launch = {
+				mode: "interactive",
+				pane_id: r.pane_id,
+				label: r.label,
+				reused: r.reused,
+				cmd,
+				prompt,
+				pane_style: cfg.pane_style,
+				pane_style_effective: paneStyle.effective,
+				prompt_accepted: r.prompt_accepted,
+				prompt_attempts: r.prompt_attempts,
+				last_status: r.last_status ?? null,
+			};
+			state.pending_pane_id = r.pane_id;
+			state.pending_pane_label = r.label;
+			state.role_panes[role] = { pane_id: r.pane_id, label: r.label };
+		} catch (e) {
+			return err(e instanceof Error ? e.message : String(e), {
+				data: { task: rel(taskFile, root), artifact: artifactRel },
+			});
+		}
 	}
 
 	state.pending_artifact = artifactRel;

@@ -54,6 +54,14 @@ If tools are missing, you may still help the **human** orchestrate:
 
 Do not pretend tools exist.
 
-## Escalate
+## Active recovery before escalate
 
-Timeouts, dead panes, round cap, reviewer dirty tree, VCS confusion, or illegal step — stop and report via status-style summary for the human.
+Do **not** stop at the first timeout. Investigate and fix:
+
+1. `herdr pane get` / `pane read` the pending role pane.
+2. Prompt stuck in input → `send-keys Enter` or re-`pane run` the pointer.
+3. Idle without artifact → nudge with exact artifact path.
+4. Still working / API retry → `workflow_wait` again.
+5. Pane dead → `dispatch_role` same kind (not rework).
+
+Escalate only after two failed recovery attempts, or on round cap / dirty reviewer tree / illegal step / VCS confusion.
