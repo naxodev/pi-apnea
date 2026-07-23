@@ -5,10 +5,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
 import {
 	effectivePaneStyle,
 	floatingPanePath,
 	parseHerdrVersion,
+	readFloatingExit,
 	resolveExecutable,
 	supportsFloating,
 	versionGte,
@@ -127,7 +129,7 @@ describe("floatingPanePath", () => {
 
 describe("writeFloatingTaskScript", () => {
 	// A mis-quoted prompt silently truncates the role's instructions.
-	test("writes executable script with shebang, cd, absolute binary, and quoted prompt", () => {
+	test("writes executable script with shebang, cd, absolute binary, exit trap, and quoted prompt", () => {
 		const d = fs.mkdtempSync(path.join(os.tmpdir(), "apnea-float-"));
 		tmpDirs.push(d);
 		const bin = path.join(d, "pi");
@@ -135,23 +137,28 @@ describe("writeFloatingTaskScript", () => {
 		fs.chmodSync(bin, 0o755);
 
 		const script = path.join(d, "task.sh");
+		const exitFile = path.join(d, "task.exit");
 		const root = "/tmp/project with spaces";
 		const prompt = "line1\nline2's quote";
 		const prevPath = process.env.PATH;
 		process.env.PATH = d;
 		try {
-			writeFloatingTaskScript(script, root, ["pi", "-p"], prompt);
+			writeFloatingTaskScript(script, root, ["pi", "-p"], prompt, exitFile);
 		} finally {
 			process.env.PATH = prevPath;
 		}
 
 		const body = fs.readFileSync(script, "utf8");
-		expect(body.startsWith("#!/usr/bin/env bash\n")).toBe(true);
-		expect(body).toContain("set -euo pipefail\n");
+		expect(body.startsWith("#!/bin/bash\n")).toBe(true);
+		expect(body).toContain("set -uo pipefail\n");
 		expect(body).toContain(`cd '${root}'`);
 		// bare `pi` must become an absolute path so popup PATH cannot 127 it
-		expect(body).toContain(`exec ${bin} -p `);
-		expect(body).not.toMatch(/exec pi -p /);
+		expect(body).toContain(`${bin} -p `);
+		expect(body).not.toMatch(/(?:^|\s)pi -p /);
+		// no bare exec — EXIT trap must outlive the oneshot
+		expect(body).not.toMatch(/\bexec\b/);
+		expect(body).toContain("trap write_exit EXIT");
+		expect(body).toContain(`EXIT_FILE=${exitFile}`);
 		// prompt must appear as a single-quoted argv (shellJoin escaping)
 		expect(body).toContain(`'${prompt.replace(/'/g, `'\\''`)}'`);
 
@@ -159,15 +166,42 @@ describe("writeFloatingTaskScript", () => {
 		expect(mode & 0o100).toBeTruthy(); // owner-executable
 	});
 
+	test("records exit code when the oneshot process ends", () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "apnea-float-run-"));
+		tmpDirs.push(d);
+		const bin = path.join(d, "pi");
+		fs.writeFileSync(bin, "#!/bin/sh\nexit 42\n");
+		fs.chmodSync(bin, 0o755);
+		const script = path.join(d, "task.sh");
+		const exitFile = path.join(d, "task.exit");
+		const prevPath = process.env.PATH;
+		process.env.PATH = d;
+		try {
+			writeFloatingTaskScript(script, d, ["pi", "-p"], "hi", exitFile);
+		} finally {
+			process.env.PATH = prevPath;
+		}
+		const r = spawnSync("bash", [script], { encoding: "utf8" });
+		expect(r.status).toBe(42);
+		expect(readFloatingExit(exitFile)).toBe(42);
+	});
+
 	test("fails closed when oneshot binary is missing", () => {
 		const d = fs.mkdtempSync(path.join(os.tmpdir(), "apnea-float-miss-"));
 		tmpDirs.push(d);
 		const script = path.join(d, "task.sh");
+		const exitFile = path.join(d, "task.exit");
 		const prevPath = process.env.PATH;
 		process.env.PATH = d; // empty of matching bins
 		try {
 			expect(() =>
-				writeFloatingTaskScript(script, d, ["no-such-harness"], "hi"),
+				writeFloatingTaskScript(
+					script,
+					d,
+					["no-such-harness"],
+					"hi",
+					exitFile,
+				),
 			).toThrow(/floating oneshot binary "no-such-harness" not found/);
 		} finally {
 			process.env.PATH = prevPath;

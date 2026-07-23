@@ -487,11 +487,30 @@ export function floatingPanePath(
 }
 
 /** Write a self-contained bash script that cds to root and execs cmd + prompt. */
+/** Read exit code written by a floating task script; null if not finished. */
+export function readFloatingExit(exitFileAbs: string): number | null {
+	if (!fs.existsSync(exitFileAbs)) return null;
+	try {
+		const t = fs.readFileSync(exitFileAbs, "utf8").trim();
+		const n = Number.parseInt(t, 10);
+		return Number.isFinite(n) ? n : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Write a self-contained bash script that cds to root, runs cmd + prompt as a
+ * child (not exec — so EXIT trap still fires), and always records the exit
+ * code for workflow_wait. Popups have no pane id; the exit file is the liveness
+ * signal.
+ */
 export function writeFloatingTaskScript(
 	scriptAbs: string,
 	root: string,
 	cmd: string[],
 	prompt: string,
+	exitFileAbs: string,
 ): void {
 	if (cmd.length === 0) {
 		throw new Error(
@@ -511,19 +530,34 @@ export function writeFloatingTaskScript(
 		);
 	}
 	const resolvedCmd = [resolved, ...cmd.slice(1)];
+	// No `exec`: EXIT trap must run after the oneshot exits (Hangup included).
 	const body = [
-		"#!/usr/bin/env bash",
-		"set -euo pipefail",
+		"#!/bin/bash",
+		"set -uo pipefail",
+		`EXIT_FILE=${shellJoin([exitFileAbs])}`,
+		"write_exit() {",
+		"  local st=$?",
+		`  printf '%s\n' "$st" > "$EXIT_FILE" 2>/dev/null || true`,
+		"}",
+		"trap write_exit EXIT",
+		"trap 'exit 129' HUP",
+		"trap 'exit 130' INT",
+		"trap 'exit 143' TERM",
 		shellJoin(["cd", root]),
-		shellJoin(["exec", ...resolvedCmd, prompt]),
+		shellJoin([...resolvedCmd, prompt]),
 		"",
 	].join("\n");
 	fs.writeFileSync(scriptAbs, body, "utf8");
 	fs.chmodSync(scriptAbs, 0o755);
 }
 
-/** Open the apnea worker popup; popups have no pane id. */
-export function openFloatingPane(taskScriptAbs: string, root: string): void {
+/**
+ * Open the apnea worker popup; popups have no pane id.
+ * Intentionally omits `--cwd`: herdr resolves the plugin's relative
+ * `scripts/run-task.sh` against that cwd (not plugin_root), which 127s when
+ * pointed at the project. The task script itself `cd`s to the project root.
+ */
+export function openFloatingPane(taskScriptAbs: string, _root: string): void {
 	const r = herdr([
 		"plugin",
 		"pane",
@@ -534,14 +568,20 @@ export function openFloatingPane(taskScriptAbs: string, root: string): void {
 		"worker",
 		"--placement",
 		"popup",
-		"--cwd",
-		root,
 		"--env",
 		`APNEA_TASK_SCRIPT=${taskScriptAbs}`,
 		"--env",
 		`PATH=${floatingPanePath()}`,
 	]);
-	if (!r.ok) throw new Error(`herdr plugin pane open failed: ${r.raw}`);
+	if (!r.ok) {
+		const raw = r.raw.trim();
+		if (/popup already open/i.test(raw)) {
+			throw new Error(
+				"floating popup already open — herdr allows only one; dismiss it or workflow_wait for the in-flight oneshot before dispatching again",
+			);
+		}
+		throw new Error(`herdr plugin pane open failed: ${raw || r.raw}`);
+	}
 }
 
 /**

@@ -283,6 +283,7 @@ export function workflowDispatch(params: {
 		state.pending_role = role;
 		state.pending_pane_id = null;
 		state.pending_pane_label = null;
+		state.pending_floating_exit = null;
 		saveState(state, root);
 		return ok(
 			`task written (no Herdr). Launch ${role} yourself; then workflow_wait.`,
@@ -308,6 +309,23 @@ export function workflowDispatch(params: {
 				`apnea herdr plugin not linked. Run /apnea setup, or: herdr plugin link ${state.package_root}/herdr-plugin`,
 			);
 		}
+		// Herdr allows one popup. Refuse while a prior floating oneshot is still live.
+		if (state.pending_floating_exit) {
+			const prevExitAbs = path.isAbsolute(state.pending_floating_exit)
+				? state.pending_floating_exit
+				: path.join(root, state.pending_floating_exit);
+			if (!fs.existsSync(prevExitAbs)) {
+				return err(
+					"floating oneshot already in flight (popup still open). Call workflow_wait, or dismiss the popup and re-dispatch after it exits",
+					{
+						data: {
+							pending_artifact: state.pending_artifact,
+							pending_floating_exit: state.pending_floating_exit,
+						},
+					},
+				);
+			}
+		}
 		let cmd: string[];
 		try {
 			cmd = resolveRoleCmd(cfg, role, "oneshot");
@@ -318,22 +336,27 @@ export function workflowDispatch(params: {
 			);
 		}
 		const scriptAbs = taskFile.replace(/\.md$/, ".sh");
+		const exitAbs = taskFile.replace(/\.md$/, ".exit");
 		try {
-			writeFloatingTaskScript(scriptAbs, root, cmd, prompt);
+			// Drop stale exit marker so wait cannot see a previous run's code.
+			fs.rmSync(exitAbs, { force: true });
+			writeFloatingTaskScript(scriptAbs, root, cmd, prompt, exitAbs);
 			openFloatingPane(scriptAbs, root);
 		} catch (e) {
 			return err(e instanceof Error ? e.message : String(e), {
 				data: { task: rel(taskFile, root), artifact: artifactRel },
 			});
 		}
-		// Popups have no pane id — wait is artifact-only; leave role_panes alone.
+		// Popups have no pane id — liveness is the exit file; leave role_panes alone.
 		state.pending_pane_id = null;
 		state.pending_pane_label = null;
+		state.pending_floating_exit = rel(exitAbs, root);
 		launch = {
 			mode: "oneshot",
 			pane_style: cfg.pane_style,
 			pane_style_effective: "floating",
 			script: rel(scriptAbs, root),
+			exit: rel(exitAbs, root),
 			cmd,
 			prompt,
 		};
@@ -358,6 +381,7 @@ export function workflowDispatch(params: {
 			};
 			state.pending_pane_id = r.pane_id;
 			state.pending_pane_label = r.label;
+			state.pending_floating_exit = null;
 			state.role_panes[role] = { pane_id: r.pane_id, label: r.label };
 		} catch (e) {
 			return err(e instanceof Error ? e.message : String(e), {

@@ -6,6 +6,7 @@ import {
 	isCompleteArtifact,
 	readArtifact,
 } from "../lib/frontmatter.ts";
+import { readFloatingExit } from "../lib/herdr.ts";
 import {
 	abs,
 	herdrEnabled,
@@ -121,6 +122,7 @@ function advanceOnComplete(
 	state.pending_role = null;
 	state.pending_pane_id = null;
 	state.pending_pane_label = null;
+	state.pending_floating_exit = null;
 	state.reviewer_tree_fingerprint = null;
 	state.last_error = null;
 	saveState(state, root);
@@ -199,9 +201,11 @@ export async function workflowWait(
 	const deadPollsNeeded = 4;
 	const idleNudgeAfterMs = 90_000;
 	let idleSince: number | null = null;
+	let floatingExitSeenAt: number | null = null;
 	let nudged = false;
 	let extendedOnce = false;
 	let finalNudgeGrace = false;
+	const floatingFlushMs = 2_000;
 	const pendingArtifact = state.pending_artifact;
 	const nudgePrompt =
 		`You appear idle without writing the required artifact.\n` +
@@ -261,6 +265,49 @@ export async function workflowWait(
 				artifactAbs,
 				nudged ? "artifact ready after nudge" : "artifact ready",
 			);
+		}
+
+		// Floating oneshot: no pane id — exit file is liveness. Fail closed when the
+		// popup dies without a complete artifact instead of hanging until timeout.
+		if (state.pending_floating_exit) {
+			const exitAbs = abs(state.pending_floating_exit, root);
+			const code = readFloatingExit(exitAbs);
+			if (code != null) {
+				lastStatus = `floating_exit_${code}`;
+				floatingExitSeenAt ??= Date.now();
+				// Short flush window: oneshot may finish writing as the process exits.
+				if (Date.now() - floatingExitSeenAt >= floatingFlushMs) {
+					const again = readArtifact(artifactAbs);
+					if (isCompleteArtifact(again, { requireVerdict })) {
+						return advanceOnComplete(
+							state,
+							root,
+							kind,
+							again!,
+							artifactAbs,
+							"artifact ready (floating oneshot exited)",
+						);
+					}
+					state.pending_floating_exit = null;
+					state.last_error = `floating oneshot exited ${code} without ${pendingArtifact}`;
+					saveState(state, root);
+					return err(
+						`floating ${state.pending_role} exited (code ${code}) without writing ${pendingArtifact}`,
+						{
+							data: {
+								exit_code: code,
+								last_agent_status: lastStatus,
+								hint:
+									code === 129
+										? "popup received Hangup (dismiss/focus steal) — re-dispatch same round; keep focus on the popup"
+										: "inspect oneshot output; re-dispatch same round or set pane_style=regular",
+							},
+						},
+					);
+				}
+			} else {
+				lastStatus = "floating_running";
+			}
 		}
 
 		if (herdrEnabled() && state.pending_pane_id) {

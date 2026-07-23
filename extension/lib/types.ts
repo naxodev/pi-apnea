@@ -56,6 +56,12 @@ export interface RunState {
 	/** Label of that pane (apnea:role:unique) */
 	pending_pane_label: string | null;
 	/**
+	 * Relative path to the floating oneshot exit-status file (written when the
+	 * popup worker process ends). Null for regular panes. Herdr popups have no
+	 * pane id — this is how wait detects death without hanging until timeout.
+	 */
+	pending_floating_exit: string | null;
+	/**
 	 * Last known live pane per role, keyed by role name.
 	 * Reuse is by pane_id only (never by scanning ambiguous labels).
 	 */

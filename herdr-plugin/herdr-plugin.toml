@@ -9,4 +9,7 @@ platforms = ["linux", "macos"]
 id = "worker"
 title = "Apnea worker"
 placement = "overlay"
-command = ["bash", "scripts/run-task.sh"]
+# Absolute bash + plugin-relative script. Bare `bash` fails on stripped plugin
+# PATH (exit 127). Do not pass a foreign --cwd to plugin pane open — relative
+# script paths resolve against that cwd, not plugin_root.
+command = ["/bin/bash", "scripts/run-task.sh"]

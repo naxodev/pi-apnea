@@ -10,6 +10,7 @@ export function loadState(root?: string): RunState | null {
 		// tolerate older state files missing pane-tracking fields
 		raw.pending_pane_id ??= null;
 		raw.pending_pane_label ??= null;
+		raw.pending_floating_exit ??= null;
 		raw.role_panes ??= {};
 		return raw;
 	} catch (e) {
