@@ -55,8 +55,9 @@ Unknown keys and unimplemented values (`isolation: "worktree"`) **hard-error** a
 - Values: `"regular"` | `"floating"`. Default is `"regular"` — **omitting the key changes nothing**.
 - Allowed in global config and overridable per project.
 - `"floating"` applies to **planner/reviewer oneshot dispatches only**. It requires herdr ≥ 0.7.4 **and** the linked `apnea` plugin (provisioned by `/apnea setup`). The popup is **session-modal**: it takes keyboard input until the worker exits, and dismissing it early kills the dispatch.
+- Floating oneshot scripts resolve `cmd_oneshot[0]` to an **absolute path** in the orchestrator environment and pass an augmented `PATH` into the popup. Bare names must be findable via the orchestrator's `PATH` (e.g. `~/.local/bin`); otherwise dispatch fails immediately instead of the popup exiting 127. Prefer absolute `cmd_oneshot` if your orchestrator process has a stripped PATH.
 - Interactive roles (orchestrator, coder) always use regular panes; the dispatch result reports `pane_style_effective: "regular (interactive role)"`.
-- Misconfiguration (old herdr, missing plugin, missing `cmd_oneshot`) fails fast at dispatch with an actionable error.
+- Misconfiguration (old herdr, missing plugin, missing `cmd_oneshot`, unresolved oneshot binary) fails fast at dispatch with an actionable error.
 - Non-goal: per-role `pane_style` is future work. Setup never writes or flips this key — it only preserves a valid existing value on re-run.
 
 ## Role modes (fixed)

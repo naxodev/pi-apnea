@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { isPiCmd, wrapInteractiveCmdNoVim } from "./pi-role-agent.ts";
 import type { PaneStyle, Role } from "./types.ts";
 
@@ -421,6 +423,69 @@ export function hasApneaPlugin(): boolean {
 	return /"(?:plugin_id|id)"\s*:\s*"apnea"/.test(r.raw);
 }
 
+function isExecutableFile(abs: string): boolean {
+	try {
+		fs.accessSync(abs, fs.constants.X_OK);
+		return fs.statSync(abs).isFile();
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Resolve a oneshot binary against the orchestrator environment.
+ * Floating plugin popups get a stripped PATH (no ~/.local/bin etc.), so bare
+ * names like `claude` exit 127 unless we bake an absolute path into the script.
+ * Walks PATH directly — no `which` subprocess (which itself vanishes when PATH
+ * is overridden for tests or minimal envs).
+ */
+export function resolveExecutable(
+	bin: string,
+	envPath: string | undefined = process.env.PATH,
+): string | null {
+	if (!bin) return null;
+	if (bin.includes("/") || bin.includes("\\")) {
+		const abs = path.isAbsolute(bin) ? bin : path.resolve(bin);
+		return isExecutableFile(abs) ? abs : null;
+	}
+	for (const dir of (envPath ?? "").split(path.delimiter)) {
+		if (!dir) continue;
+		const candidate = path.join(dir, bin);
+		if (isExecutableFile(candidate)) return candidate;
+	}
+	return null;
+}
+
+/**
+ * PATH for floating plugin panes: orchestrator PATH plus common user-local
+ * bin dirs so child tools the oneshot agent spawns still resolve.
+ */
+export function floatingPanePath(
+	base: string = process.env.PATH ?? "",
+	home: string = os.homedir(),
+): string {
+	const extras = [
+		path.join(home, ".local", "bin"),
+		path.join(home, ".bun", "bin"),
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+	];
+	const parts = base.split(path.delimiter).filter(Boolean);
+	const seen = new Set(parts);
+	for (const extra of extras) {
+		if (seen.has(extra)) continue;
+		try {
+			if (fs.statSync(extra).isDirectory()) {
+				parts.push(extra);
+				seen.add(extra);
+			}
+		} catch {
+			// skip missing dirs
+		}
+	}
+	return parts.join(path.delimiter);
+}
+
 /** Write a self-contained bash script that cds to root and execs cmd + prompt. */
 export function writeFloatingTaskScript(
 	scriptAbs: string,
@@ -428,11 +493,29 @@ export function writeFloatingTaskScript(
 	cmd: string[],
 	prompt: string,
 ): void {
+	if (cmd.length === 0) {
+		throw new Error(
+			"floating oneshot cmd is empty; set cmd_oneshot on the role profile",
+		);
+	}
+	const bin = cmd[0];
+	if (bin === undefined || bin === "") {
+		throw new Error(
+			"floating oneshot binary is empty; set cmd_oneshot on the role profile",
+		);
+	}
+	const resolved = resolveExecutable(bin);
+	if (!resolved) {
+		throw new Error(
+			`floating oneshot binary "${bin}" not found on PATH; use an absolute cmd_oneshot or set pane_style=regular`,
+		);
+	}
+	const resolvedCmd = [resolved, ...cmd.slice(1)];
 	const body = [
 		"#!/usr/bin/env bash",
 		"set -euo pipefail",
 		shellJoin(["cd", root]),
-		shellJoin(["exec", ...cmd, prompt]),
+		shellJoin(["exec", ...resolvedCmd, prompt]),
 		"",
 	].join("\n");
 	fs.writeFileSync(scriptAbs, body, "utf8");
@@ -455,6 +538,8 @@ export function openFloatingPane(taskScriptAbs: string, root: string): void {
 		root,
 		"--env",
 		`APNEA_TASK_SCRIPT=${taskScriptAbs}`,
+		"--env",
+		`PATH=${floatingPanePath()}`,
 	]);
 	if (!r.ok) throw new Error(`herdr plugin pane open failed: ${r.raw}`);
 }

@@ -7,7 +7,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
 	effectivePaneStyle,
+	floatingPanePath,
 	parseHerdrVersion,
+	resolveExecutable,
 	supportsFloating,
 	versionGte,
 	writeFloatingTaskScript,
@@ -88,25 +90,88 @@ describe("effectivePaneStyle", () => {
 	});
 });
 
+describe("resolveExecutable", () => {
+	// Bare names must resolve in the orchestrator env before the popup PATH strips them.
+	test("resolves absolute executable paths and rejects missing ones", () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "apnea-bin-"));
+		tmpDirs.push(d);
+		const bin = path.join(d, "fake-claude");
+		fs.writeFileSync(bin, "#!/bin/sh\n");
+		fs.chmodSync(bin, 0o755);
+		expect(resolveExecutable(bin)).toBe(bin);
+		expect(resolveExecutable(path.join(d, "missing"))).toBeNull();
+	});
+
+	test("resolves bare names via PATH", () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "apnea-path-"));
+		tmpDirs.push(d);
+		const bin = path.join(d, "mytool");
+		fs.writeFileSync(bin, "#!/bin/sh\n");
+		fs.chmodSync(bin, 0o755);
+		expect(resolveExecutable("mytool", d)).toBe(bin);
+		expect(resolveExecutable("mytool", "/no/such/bin")).toBeNull();
+	});
+});
+
+describe("floatingPanePath", () => {
+	test("appends existing user-local bins without dropping base PATH", () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "apnea-fpp-"));
+		tmpDirs.push(d);
+		const localBin = path.join(d, ".local", "bin");
+		fs.mkdirSync(localBin, { recursive: true });
+		const out = floatingPanePath("/usr/bin:/bin", d);
+		expect(out.startsWith("/usr/bin:/bin")).toBe(true);
+		expect(out.split(path.delimiter)).toContain(localBin);
+	});
+});
+
 describe("writeFloatingTaskScript", () => {
 	// A mis-quoted prompt silently truncates the role's instructions.
-	test("writes executable script with shebang, cd, and quoted prompt", () => {
+	test("writes executable script with shebang, cd, absolute binary, and quoted prompt", () => {
 		const d = fs.mkdtempSync(path.join(os.tmpdir(), "apnea-float-"));
 		tmpDirs.push(d);
+		const bin = path.join(d, "pi");
+		fs.writeFileSync(bin, "#!/bin/sh\n");
+		fs.chmodSync(bin, 0o755);
+
 		const script = path.join(d, "task.sh");
 		const root = "/tmp/project with spaces";
 		const prompt = "line1\nline2's quote";
-		writeFloatingTaskScript(script, root, ["pi", "-p"], prompt);
+		const prevPath = process.env.PATH;
+		process.env.PATH = d;
+		try {
+			writeFloatingTaskScript(script, root, ["pi", "-p"], prompt);
+		} finally {
+			process.env.PATH = prevPath;
+		}
 
 		const body = fs.readFileSync(script, "utf8");
 		expect(body.startsWith("#!/usr/bin/env bash\n")).toBe(true);
 		expect(body).toContain("set -euo pipefail\n");
 		expect(body).toContain(`cd '${root}'`);
-		expect(body).toMatch(/exec pi -p /);
+		// bare `pi` must become an absolute path so popup PATH cannot 127 it
+		expect(body).toContain(`exec ${bin} -p `);
+		expect(body).not.toMatch(/exec pi -p /);
 		// prompt must appear as a single-quoted argv (shellJoin escaping)
 		expect(body).toContain(`'${prompt.replace(/'/g, `'\\''`)}'`);
 
 		const mode = fs.statSync(script).mode & 0o777;
 		expect(mode & 0o100).toBeTruthy(); // owner-executable
+	});
+
+	test("fails closed when oneshot binary is missing", () => {
+		const d = fs.mkdtempSync(path.join(os.tmpdir(), "apnea-float-miss-"));
+		tmpDirs.push(d);
+		const script = path.join(d, "task.sh");
+		const prevPath = process.env.PATH;
+		process.env.PATH = d; // empty of matching bins
+		try {
+			expect(() =>
+				writeFloatingTaskScript(script, d, ["no-such-harness"], "hi"),
+			).toThrow(/floating oneshot binary "no-such-harness" not found/);
+		} finally {
+			process.env.PATH = prevPath;
+		}
+		expect(fs.existsSync(script)).toBe(false);
 	});
 });

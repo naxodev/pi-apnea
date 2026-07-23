@@ -73,10 +73,10 @@ describe("floating dispatch smoke", () => {
 				return;
 			}
 
-			// herdr ≥ 0.7.4: either plugin-missing error, or a successful floating launch
+			// herdr ≥ 0.7.4: plugin/cmd/binary/open failures must stay actionable
 			if (!disp.ok) {
 				expect(disp.error).toMatch(
-					/apnea herdr plugin not linked|cmd_oneshot|herdr plugin pane open failed/,
+					/apnea herdr plugin not linked|cmd_oneshot|not found on PATH|herdr plugin pane open failed/,
 				);
 				return;
 			}
