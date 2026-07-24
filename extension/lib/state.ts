@@ -1,6 +1,9 @@
 import * as fs from "node:fs";
+import { getRound, roundKey, setRound } from "../domain/rounds.ts";
 import { ensureApneaDirs, statePath } from "./paths.ts";
 import type { RunState, Step } from "./types.ts";
+
+export { getRound, roundKey, setRound };
 
 export function loadState(root?: string): RunState | null {
 	const p = statePath(root);
@@ -37,19 +40,4 @@ export function setStep(state: RunState, step: Step, root?: string): RunState {
 	state.last_error = null;
 	saveState(state, root);
 	return state;
-}
-
-export function roundKey(phaseIndex: number, gate: string): string {
-	if (gate === "plan_review") return "plan_review";
-	if (gate === "finishing") return "finishing";
-	const n = String(phaseIndex).padStart(2, "0");
-	return `phase-${n}/${gate}`;
-}
-
-export function getRound(state: RunState, key: string): number {
-	return state.rounds[key] ?? 1;
-}
-
-export function setRound(state: RunState, key: string, n: number): void {
-	state.rounds[key] = n;
 }

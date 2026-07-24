@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import { slugify } from "../domain/slug.ts";
 import { loadConfig } from "../lib/config.ts";
 import {
 	ensureApneaDirs,
@@ -11,16 +12,6 @@ import { loadState, saveState } from "../lib/state.ts";
 import type { RunState, ToolResult } from "../lib/types.ts";
 import { detectVcs, isDirty } from "../lib/vcs.ts";
 import { ensureGitBranch } from "../lib/vcs.ts";
-
-function slugify(s: string): string {
-	return (
-		s
-			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, "-")
-			.replace(/^-|-$/g, "")
-			.slice(0, 48) || "run"
-	);
-}
 
 export function workflowStart(params: {
 	goal: string;

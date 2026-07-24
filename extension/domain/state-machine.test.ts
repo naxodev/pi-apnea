@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { Result } from "effect";
 import {
 	LEGAL_TOOLS,
 	allowedKinds,
 	stepAfterArtifact,
+	toolAllowed,
 } from "./state-machine.ts";
 
 describe("state machine", () => {
@@ -36,5 +38,21 @@ describe("state machine", () => {
 	test("allowed kinds at plan_review include plan rework", () => {
 		expect(allowedKinds("plan_review")).toContain("plan");
 		expect(allowedKinds("coding")).toEqual(["code"]);
+	});
+
+	test("toolAllowed succeeds for legal tool", () => {
+		const r = toolAllowed("coding", "dispatch_role");
+		expect(Result.isSuccess(r)).toBe(true);
+	});
+
+	test("toolAllowed fails with IllegalTool + legal list", () => {
+		const r = toolAllowed("done", "dispatch_role");
+		expect(Result.isFailure(r)).toBe(true);
+		if (Result.isFailure(r)) {
+			expect(r.failure._tag).toBe("IllegalTool");
+			expect(r.failure.step).toBe("done");
+			expect(r.failure.tool).toBe("dispatch_role");
+			expect(r.failure.legal).toEqual(["workflow_status"]);
+		}
 	});
 });

@@ -14,10 +14,12 @@ import {
 	paneRun,
 	sleep,
 } from "../lib/herdr-wait.ts";
+import { Result } from "effect";
+import { toToolResult } from "../errors.ts";
 import { err, ok } from "../lib/result.ts";
 import {
-	assertToolAllowed,
 	stepAfterArtifact,
+	toolAllowed,
 	type DispatchKind,
 } from "../lib/state-machine.ts";
 import { requireState, saveState } from "../lib/state.ts";
@@ -171,11 +173,11 @@ export async function workflowWait(
 	let state;
 	try {
 		state = requireState(root);
-		assertToolAllowed(state.step, "workflow_wait");
 	} catch (e) {
-		const errObj = e as Error & { legal_next?: string[] };
-		return err(errObj.message, { legal_next: errObj.legal_next });
+		return err(e instanceof Error ? e.message : String(e));
 	}
+	const allowed = toolAllowed(state.step, "workflow_wait");
+	if (Result.isFailure(allowed)) return toToolResult(allowed.failure);
 
 	if (!state.pending_artifact) {
 		return err("no pending_artifact; dispatch_role first");

@@ -4,8 +4,10 @@ import { loadConfig } from "../lib/config.ts";
 import { asVerdict, readArtifact } from "../lib/frontmatter.ts";
 import { abs, phaseDir } from "../lib/paths.ts";
 // phaseDir used for package fallback
+import { Result } from "effect";
+import { toToolResult } from "../errors.ts";
 import { err, ok } from "../lib/result.ts";
-import { assertToolAllowed } from "../lib/state-machine.ts";
+import { toolAllowed } from "../lib/state-machine.ts";
 import { requireState, saveState } from "../lib/state.ts";
 import type { ToolResult } from "../lib/types.ts";
 import {
@@ -24,11 +26,11 @@ export function workflowCommitPhase(params: {
 	let state;
 	try {
 		state = requireState(root);
-		assertToolAllowed(state.step, "workflow_commit_phase");
 	} catch (e) {
-		const errObj = e as Error & { legal_next?: string[] };
-		return err(errObj.message, { legal_next: errObj.legal_next });
+		return err(e instanceof Error ? e.message : String(e));
 	}
+	const allowed = toolAllowed(state.step, "workflow_commit_phase");
+	if (Result.isFailure(allowed)) return toToolResult(allowed.failure);
 
 	if (state.step !== "committing") {
 		return err(`step is ${state.step}, need committing`, {

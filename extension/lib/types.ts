@@ -84,20 +84,7 @@ export interface FrontMatter {
 	body: string;
 }
 
-export interface ToolOk {
-	ok: true;
-	message: string;
-	data?: Record<string, unknown>;
-}
-
-export interface ToolErr {
-	ok: false;
-	error: string;
-	legal_next?: string[];
-	data?: Record<string, unknown>;
-}
-
-export type ToolResult = ToolOk | ToolErr;
+export type { ToolErr, ToolOk, ToolResult } from "../result.ts";
 
 /**
  * All worker roles use interactive TUIs so you can watch them live in Herdr.

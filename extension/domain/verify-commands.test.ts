@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { extractVerifyCommands } from "./vcs.ts";
+import { extractVerifyCommands } from "./verify-commands.ts";
 
 describe("extractVerifyCommands", () => {
 	// Commit gate must run the Verify section, not earlier bash sketches in the package.

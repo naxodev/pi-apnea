@@ -531,6 +531,8 @@ export function writeFloatingTaskScript(
 	}
 	const resolvedCmd = [resolved, ...cmd.slice(1)];
 	// No `exec`: EXIT trap must run after the oneshot exits (Hangup included).
+	// End-of-options `--` before the prompt so variadic flags like Claude's
+	// `--allowedTools <tools...>` cannot swallow the prompt as another tool.
 	const body = [
 		"#!/bin/bash",
 		"set -uo pipefail",
@@ -544,7 +546,7 @@ export function writeFloatingTaskScript(
 		"trap 'exit 130' INT",
 		"trap 'exit 143' TERM",
 		shellJoin(["cd", root]),
-		shellJoin([...resolvedCmd, prompt]),
+		shellJoin([...resolvedCmd, "--", prompt]),
 		"",
 	].join("\n");
 	fs.writeFileSync(scriptAbs, body, "utf8");

@@ -155,6 +155,8 @@ describe("writeFloatingTaskScript", () => {
 		// bare `pi` must become an absolute path so popup PATH cannot 127 it
 		expect(body).toContain(`${bin} -p `);
 		expect(body).not.toMatch(/(?:^|\s)pi -p /);
+		// end-of-options so variadic CLI flags cannot eat the prompt
+		expect(body).toContain(" -- ");
 		// no bare exec — EXIT trap must outlive the oneshot
 		expect(body).not.toMatch(/\bexec\b/);
 		expect(body).toContain("trap write_exit EXIT");

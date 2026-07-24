@@ -19,11 +19,13 @@ import {
 	supportsFloating,
 	writeFloatingTaskScript,
 } from "../lib/herdr.ts";
+import { Result } from "effect";
+import { toToolResult } from "../errors.ts";
 import { err, ok } from "../lib/result.ts";
 import {
 	allowedKinds,
-	assertToolAllowed,
 	expectedRole,
+	toolAllowed,
 	type DispatchKind,
 } from "../lib/state-machine.ts";
 import {
@@ -95,11 +97,11 @@ export function workflowDispatch(params: {
 	let state;
 	try {
 		state = requireState(root);
-		assertToolAllowed(state.step, "dispatch_role");
 	} catch (e) {
-		const errObj = e as Error & { legal_next?: string[] };
-		return err(errObj.message, { legal_next: errObj.legal_next });
+		return err(e instanceof Error ? e.message : String(e));
 	}
+	const allowed = toolAllowed(state.step, "dispatch_role");
+	if (Result.isFailure(allowed)) return toToolResult(allowed.failure);
 
 	const kinds = allowedKinds(state.step);
 	if (!kinds.includes(params.kind)) {
