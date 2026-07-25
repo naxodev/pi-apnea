@@ -7,7 +7,7 @@ import {
 	type PaneStyle,
 	type Profile,
 	type Role,
-} from "../lib/types.ts";
+} from "../domain/types.ts";
 
 const StringArray = Schema.Array(Schema.String);
 

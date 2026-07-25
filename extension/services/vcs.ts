@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import * as path from "node:path";
 import { Context, Effect, Layer } from "effect";
 import { VcsError } from "../errors.ts";
-import type { VcsBackend } from "../lib/types.ts";
+import type { VcsBackend } from "../domain/types.ts";
 import { FileSystem } from "./file-system.ts";
 
 export interface VcsService {

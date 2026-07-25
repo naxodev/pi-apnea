@@ -7,7 +7,7 @@ import {
 	tasksDir,
 } from "../domain/paths.ts";
 import { NoRunState, StateCorrupt } from "../errors.ts";
-import type { RunState } from "../lib/types.ts";
+import type { RunState } from "../domain/types.ts";
 import { decodeRunState } from "../schema/state.ts";
 import { FileSystem, type FileSystemService } from "./file-system.ts";
 

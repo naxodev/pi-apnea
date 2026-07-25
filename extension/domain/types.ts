@@ -84,8 +84,6 @@ export interface FrontMatter {
 	body: string;
 }
 
-export type { ToolErr, ToolOk, ToolResult } from "../result.ts";
-
 /**
  * All worker roles use interactive TUIs so you can watch them live in Herdr.
  * Oneshot (`claude -p`, `pi -p`) is intentionally not used for dispatch:

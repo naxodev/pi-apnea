@@ -1,4 +1,4 @@
-import type { FrontMatter, Verdict } from "../lib/types.ts";
+import type { FrontMatter, Verdict } from "./types.ts";
 
 const FM_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 

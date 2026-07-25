@@ -10,7 +10,7 @@ import * as path from "node:path";
 import { Effect, Layer } from "effect";
 import { statePath } from "../domain/paths.ts";
 import { ConfigError } from "../errors.ts";
-import type { RunState } from "../lib/types.ts";
+import type { RunState } from "../domain/types.ts";
 import { workflowStart } from "../adapters/start.ts";
 import {
 	workflowResetRounds,

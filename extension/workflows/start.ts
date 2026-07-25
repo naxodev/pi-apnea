@@ -7,7 +7,7 @@ import {
 	VcsError,
 	type AppError,
 } from "../errors.ts";
-import type { RunState } from "../lib/types.ts";
+import type { RunState } from "../domain/types.ts";
 import { ok, type ToolResult } from "../result.ts";
 import { Config } from "../services/config.ts";
 import { FileSystem } from "../services/file-system.ts";

@@ -6,7 +6,7 @@ import {
 	type ApneaConfig,
 	type Role,
 	type RoleMode,
-} from "../lib/types.ts";
+} from "../domain/types.ts";
 import {
 	applyProjectConfig,
 	decodeGlobalConfig,

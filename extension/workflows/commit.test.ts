@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test";
 import { Effect, Exit, Layer } from "effect";
 import { statePath } from "../domain/paths.ts";
-import type { RunState } from "../lib/types.ts";
+import type { RunState } from "../domain/types.ts";
 import { makeFakeFileSystem } from "../test/fake-file-system.ts";
 import { fakeConfigLayer } from "../test/fake-config.ts";
 import { fakeVcsLayer } from "../test/fake-vcs.ts";

@@ -237,7 +237,19 @@ function paneSendKeysSync(paneId: string, keys: string[]): void {
 	}
 }
 
-function hasApneaPluginSync(): boolean {
+/**
+ * Temporary sync probe for `lib/setup.ts`; Phase 6 moves setup onto the
+ * `Herdr` service and makes this private again.
+ */
+export function herdrVersionSync(): [number, number, number] | null {
+	return parseHerdrVersion(herdrCli(["--version"]).raw);
+}
+
+/**
+ * Temporary sync probe for `lib/setup.ts`; Phase 6 moves setup onto the
+ * `Herdr` service and makes this private again.
+ */
+export function hasApneaPluginSync(): boolean {
 	const r = herdrCli(["plugin", "list", "--plugin", "apnea", "--json"]);
 	const json = r.json;
 	if (json) {
@@ -535,7 +547,7 @@ export const HerdrLive = Layer.effect(
 		Herdr.of({
 			enabled: Effect.sync(herdrEnabledSync),
 
-			version: Effect.sync(() => parseHerdrVersion(herdrCli(["--version"]).raw)),
+			version: Effect.sync(herdrVersionSync),
 
 			hasApneaPlugin: Effect.sync(hasApneaPluginSync),
 

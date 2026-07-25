@@ -16,7 +16,7 @@ import {
 	WaitTimeout,
 	type AppError,
 } from "../errors.ts";
-import type { FrontMatter } from "../lib/types.ts";
+import type { FrontMatter } from "../domain/types.ts";
 import { ok, type ToolResult } from "../result.ts";
 import { decodeFrontMatterResult } from "../schema/frontmatter.ts";
 import { Config } from "../services/config.ts";

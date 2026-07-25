@@ -1,5 +1,81 @@
 import { describe, expect, test } from "bun:test";
-import { floatingTaskScriptBody, looksLikeShellOnly, parseFloatingExit } from "./herdr.ts";
+import {
+	effectivePaneStyle,
+	floatingTaskScriptBody,
+	looksLikeShellOnly,
+	parseFloatingExit,
+	parseHerdrVersion,
+	supportsFloating,
+	versionGte,
+} from "./herdr.ts";
+import type { Role } from "./types.ts";
+
+describe("parseHerdrVersion", () => {
+	// Version gate is the only thing between a user and a popup flag their herdr lacks.
+	test("parses herdr X.Y.Z line", () => {
+		expect(parseHerdrVersion("herdr 0.7.3")).toEqual([0, 7, 3]);
+	});
+
+	test("accepts multi-line/noisy output", () => {
+		expect(parseHerdrVersion("info\nherdr 0.7.4\nextra")).toEqual([0, 7, 4]);
+	});
+
+	test("garbage → null (fail closed)", () => {
+		expect(parseHerdrVersion("not a version")).toBeNull();
+		expect(parseHerdrVersion("")).toBeNull();
+	});
+});
+
+describe("supportsFloating / version compare", () => {
+	// Fail-closed keeps unattended runs from hanging on a CLI error mid-dispatch;
+	// numeric compare guards against string-compare bugs (0.10.x > 0.7.x).
+	test("0.7.3 false, 0.7.4+ true, unparseable false", () => {
+		expect(supportsFloating([0, 7, 3])).toBe(false);
+		expect(supportsFloating([0, 7, 4])).toBe(true);
+		expect(supportsFloating([0, 8, 0])).toBe(true);
+		expect(supportsFloating([1, 0, 0])).toBe(true);
+		expect(supportsFloating([0, 10, 0])).toBe(true);
+		expect(supportsFloating(null)).toBe(false);
+	});
+
+	test("versionGte is numeric, not lexical", () => {
+		expect(versionGte([0, 10, 0], [0, 7, 4])).toBe(true);
+		expect(versionGte([0, 7, 3], [0, 7, 4])).toBe(false);
+		expect(versionGte([0, 7, 4], [0, 7, 4])).toBe(true);
+	});
+});
+
+describe("effectivePaneStyle", () => {
+	// Interactive-role downgrade must be *reported*, never silent.
+	const roles: Role[] = ["planner", "reviewer", "coder", "orchestrator"];
+
+	test("regular config → regular for every role", () => {
+		for (const role of roles) {
+			expect(effectivePaneStyle("regular", role)).toEqual({
+				style: "regular",
+				effective: "regular",
+			});
+		}
+	});
+
+	test("floating + planner/reviewer → floating", () => {
+		for (const role of ["planner", "reviewer"] as Role[]) {
+			expect(effectivePaneStyle("floating", role)).toEqual({
+				style: "floating",
+				effective: "floating",
+			});
+		}
+	});
+
+	test("floating + coder/orchestrator → regular with explicit reason", () => {
+		for (const role of ["coder", "orchestrator"] as Role[]) {
+			expect(effectivePaneStyle("floating", role)).toEqual({
+				style: "regular",
+				effective: "regular (interactive role)",
+			});
+		}
+	});
+});
 
 describe("parseFloatingExit", () => {
 	// A mis-parse makes wait hang forever (null when a code was actually

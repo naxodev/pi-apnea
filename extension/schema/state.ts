@@ -1,6 +1,6 @@
 import { Result, Schema } from "effect";
 import { StateCorrupt } from "../errors.ts";
-import type { RunState, Step } from "../lib/types.ts";
+import type { RunState, Step } from "../domain/types.ts";
 
 export const StepSchema = Schema.Literals([
 	"planning",
@@ -83,7 +83,7 @@ export function decodeRunState(
 		);
 	}
 	const d = decoded.success;
-	// Mirror lib/state.ts loadState backward-compat defaults
+	// Backward-compat defaults for state.json files predating pane tracking.
 	const state: RunState = {
 		version: 1,
 		slug: d.slug,

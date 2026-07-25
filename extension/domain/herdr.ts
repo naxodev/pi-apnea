@@ -1,4 +1,4 @@
-import type { PaneStyle, Role } from "../lib/types.ts";
+import type { PaneStyle, Role } from "./types.ts";
 
 /** Parse `herdr X.Y.Z` (or noisy multi-line) into a numeric tuple. */
 export function parseHerdrVersion(

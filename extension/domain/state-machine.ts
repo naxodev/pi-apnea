@@ -1,6 +1,6 @@
 import { Result } from "effect";
 import { IllegalTool } from "../errors.ts";
-import type { Role, Step } from "../lib/types.ts";
+import type { Role, Step } from "./types.ts";
 
 /** Legal next steps after a successful transition from `step`. */
 export const LEGAL_TOOLS: Record<

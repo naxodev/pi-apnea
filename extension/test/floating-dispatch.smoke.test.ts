@@ -9,8 +9,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { workflowStart } from "../adapters/start.ts";
-import { parseHerdrVersion, supportsFloating } from "../lib/herdr.ts";
-import { requireState } from "../lib/state.ts";
+import { parseHerdrVersion, supportsFloating } from "../domain/herdr.ts";
+import { readState } from "./read-state.ts";
 import { workflowDispatch } from "../adapters/dispatch.ts";
 
 const dirs: string[] = [];
@@ -84,7 +84,7 @@ describe("floating dispatch smoke", () => {
 			expect(disp.data?.launch).toMatchObject({
 				pane_style_effective: "floating",
 			});
-			const state = requireState(d);
+			const state = await readState(d);
 			expect(state.pending_pane_id).toBeNull();
 			expect(state.role_panes.planner).toBeUndefined();
 		},

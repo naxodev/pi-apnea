@@ -2,7 +2,7 @@ import { describe, expect } from "bun:test";
 import { Effect, Fiber, Layer, Result } from "effect";
 import { TestClock } from "effect/testing";
 import { statePath } from "../domain/paths.ts";
-import type { RunState } from "../lib/types.ts";
+import type { RunState } from "../domain/types.ts";
 import { fakeConfigLayer } from "../test/fake-config.ts";
 import { makeFakeFileSystem } from "../test/fake-file-system.ts";
 import { fakeHerdrLayer, type FakeHerdrOptions } from "../test/fake-herdr.ts";

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { RunState } from "../lib/types.ts";
+import type { RunState } from "./types.ts";
 import { getRound, roundKey, setRound } from "./rounds.ts";
 
 function baseState(): RunState {

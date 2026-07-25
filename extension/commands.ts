@@ -3,10 +3,10 @@
  * These call the same functions as the LLM tools — no workflow_* typing required.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { formatResult } from "./lib/result.ts";
+import { formatResult } from "./result.ts";
 import { apneaSetup } from "./lib/setup.ts";
-import type { DispatchKind } from "./lib/state-machine.ts";
-import type { ToolResult } from "./lib/types.ts";
+import type { DispatchKind } from "./domain/state-machine.ts";
+import type { ToolResult } from "./result.ts";
 import { workflowStart } from "./adapters/start.ts";
 import { workflowResetRounds, workflowStatus } from "./adapters/status.ts";
 import { workflowCommitPhase } from "./adapters/commit.ts";

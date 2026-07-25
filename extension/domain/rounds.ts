@@ -1,4 +1,4 @@
-import type { RunState } from "../lib/types.ts";
+import type { RunState } from "./types.ts";
 
 export function roundKey(phaseIndex: number, gate: string): string {
 	if (gate === "plan_review") return "plan_review";

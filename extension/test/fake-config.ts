@@ -5,7 +5,7 @@ import {
 	type ApneaConfig,
 	type Role,
 	type RoleMode,
-} from "../lib/types.ts";
+} from "../domain/types.ts";
 import { Config, type ConfigService } from "../services/config.ts";
 
 export type FakeConfigOptions = {

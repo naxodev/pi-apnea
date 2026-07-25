@@ -5,11 +5,11 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { hasApneaPlugin, herdrVersion, supportsFloating } from "./herdr.ts";
-import { globalConfigPath, packageRoot, projectConfigPath } from "./paths.ts";
+import { supportsFloating } from "../domain/herdr.ts";
+import { globalConfigPath, packageRoot, projectConfigPath } from "../domain/paths.ts";
+import { hasApneaPluginSync, herdrVersionSync } from "../services/herdr.ts";
 import { materializePiRoleAgentDir } from "../services/pi-role-agent.ts";
-import { err, ok } from "./result.ts";
-import type { ToolResult } from "./types.ts";
+import { err, ok, type ToolResult } from "../result.ts";
 
 function onPath(bin: string): boolean {
 	const r = spawnSync("which", [bin], { encoding: "utf8" });
@@ -301,14 +301,14 @@ export function apneaSetup(params: {
 	let herdrPlugin: ProvisionResult | null = null;
 	let herdrVer: string | null = null;
 	if (has.herdr) {
-		const version = herdrVersion();
+		const version = herdrVersionSync();
 		herdrVer =
 			version == null ? null : `${version[0]}.${version[1]}.${version[2]}`;
 		herdrPlugin = provisionHerdrPlugin({
 			srcDir: path.join(packageRoot(), "herdr-plugin"),
 			destDir: path.join(path.dirname(globalConfigPath()), "herdr-plugin"),
 			version,
-			hasPlugin: hasApneaPlugin,
+			hasPlugin: hasApneaPluginSync,
 			link: linkHerdrPlugin,
 		});
 		missing.push(...herdrPlugin.notes);

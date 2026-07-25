@@ -18,8 +18,8 @@ import {
 	type DispatchKind,
 } from "../domain/state-machine.ts";
 import { GateRefused, HerdrError, IllegalKind, type AppError } from "../errors.ts";
-import type { Role } from "../lib/types.ts";
-import { ROLE_MODE } from "../lib/types.ts";
+import type { Role } from "../domain/types.ts";
+import { ROLE_MODE } from "../domain/types.ts";
 import { ok, type ToolResult } from "../result.ts";
 import { Config } from "../services/config.ts";
 import { FileSystem } from "../services/file-system.ts";

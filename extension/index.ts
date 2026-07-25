@@ -4,8 +4,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { registerApneaCommands } from "./commands.ts";
-import { toolContent } from "./lib/result.ts";
-import type { ToolResult } from "./lib/types.ts";
+import { toolContent } from "./result.ts";
+import type { ToolResult } from "./result.ts";
 import { workflowStart } from "./adapters/start.ts";
 import { workflowResetRounds, workflowStatus } from "./adapters/status.ts";
 import { workflowCommitPhase } from "./adapters/commit.ts";

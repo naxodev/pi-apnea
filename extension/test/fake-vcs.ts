@@ -1,6 +1,6 @@
 import { Effect, Layer } from "effect";
 import { VcsError } from "../errors.ts";
-import type { VcsBackend } from "../lib/types.ts";
+import type { VcsBackend } from "../domain/types.ts";
 import { Vcs, type VcsService } from "../services/vcs.ts";
 
 export type FakeVcsOptions = {

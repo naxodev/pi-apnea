@@ -1,7 +1,7 @@
 import { Effect, Layer } from "effect";
 import { describe, expect } from "bun:test";
 import { statePath } from "../domain/paths.ts";
-import type { ApneaConfig, RunState } from "../lib/types.ts";
+import type { ApneaConfig, RunState } from "../domain/types.ts";
 import { fakeConfigLayer } from "../test/fake-config.ts";
 import { makeFakeFileSystem } from "../test/fake-file-system.ts";
 import { fakeHerdrLayer } from "../test/fake-herdr.ts";
