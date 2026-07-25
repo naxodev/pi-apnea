@@ -19,9 +19,7 @@ export interface RunStoreService {
 	readonly require: (
 		root: string,
 	) => Effect.Effect<RunState, NoRunState | StateCorrupt>;
-	readonly abandon: (
-		root: string,
-	) => Effect.Effect<string, NoRunState | StateCorrupt>;
+	readonly abandon: (root: string) => Effect.Effect<string, NoRunState>;
 }
 
 export class RunStore extends Context.Service<RunStore, RunStoreService>()(
@@ -89,13 +87,11 @@ export const RunStoreLive = Layer.effect(
 				return s;
 			});
 
-		const abandon = (
-			root: string,
-		): Effect.Effect<string, NoRunState | StateCorrupt> =>
+		const abandon = (root: string): Effect.Effect<string, NoRunState> =>
 			Effect.gen(function* () {
-				const s = yield* load(root);
-				if (!s) return yield* new NoRunState({});
 				const p = statePath(root);
+				const present = yield* fs.exists(p);
+				if (!present) return yield* new NoRunState({});
 				const millis = yield* Clock.currentTimeMillis;
 				const bak = `${p}.abandoned.${millis}`;
 				yield* fs.rename(p, bak);

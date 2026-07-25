@@ -9,7 +9,7 @@ import type { DispatchKind } from "./lib/state-machine.ts";
 import type { ToolResult } from "./lib/types.ts";
 import { workflowStart } from "./adapters/start.ts";
 import { workflowResetRounds, workflowStatus } from "./adapters/status.ts";
-import { workflowCommitPhase } from "./tools/commit.ts";
+import { workflowCommitPhase } from "./adapters/commit.ts";
 import { workflowDispatch } from "./tools/dispatch.ts";
 import { workflowWait } from "./tools/wait.ts";
 
@@ -125,7 +125,9 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 						label: k,
 					}),
 				);
-				return kindHits.length ? kindHits : hits.length ? hits : null;
+				if (kindHits.length) return kindHits;
+				if (hits.length) return hits;
+				return null;
 			}
 			if (sub === "setup") {
 				const p = parts[1] ?? "";
@@ -278,7 +280,7 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 								.trim() || undefined;
 						notify(
 							ctx,
-							workflowCommitPhase({
+							await workflowCommitPhase({
 								message,
 								no_remaining_phases:
 									flags.has("done") || tokens.includes("--done"),

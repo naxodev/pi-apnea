@@ -1,19 +1,18 @@
 import { Effect } from "effect";
-import { packageRoot, projectConfigPath } from "../domain/paths.ts";
+import { packageRoot } from "../domain/paths.ts";
 import { slugify } from "../domain/slug.ts";
 import {
-	ConfigError,
 	GateRefused,
 	NoRunState,
 	VcsError,
 	type AppError,
 } from "../errors.ts";
-import { loadConfig } from "../lib/config.ts";
 import type { RunState } from "../lib/types.ts";
-import { detectVcs, ensureGitBranch, isDirty } from "../lib/vcs.ts";
 import { ok, type ToolResult } from "../result.ts";
+import { Config } from "../services/config.ts";
 import { FileSystem } from "../services/file-system.ts";
 import { RunStore } from "../services/run-store.ts";
+import { Vcs } from "../services/vcs.ts";
 
 export type StartParams = {
 	goal: string;
@@ -29,10 +28,16 @@ export type StartParams = {
 export const startWorkflow = (
 	params: StartParams,
 	root: string,
-): Effect.Effect<ToolResult, AppError, FileSystem | RunStore> =>
+): Effect.Effect<
+	ToolResult,
+	AppError,
+	FileSystem | RunStore | Config | Vcs
+> =>
 	Effect.gen(function* () {
 		const store = yield* RunStore;
 		const fs = yield* FileSystem;
+		const config = yield* Config;
+		const vcsSvc = yield* Vcs;
 		const action = params.action ?? "start";
 
 		if (action === "abandon") {
@@ -75,17 +80,9 @@ export const startWorkflow = (
 			});
 		}
 
-		// Phase 3: Config/Vcs service
-		const cfg = yield* Effect.try({
-			try: () => loadConfig(root),
-			catch: (e) =>
-				new ConfigError({
-					message: e instanceof Error ? e.message : String(e),
-				}),
-		});
+		const cfg = yield* config.load(root);
 
-		// Phase 3: Config/Vcs service
-		const vcs = detectVcs(root);
+		const vcs = yield* vcsSvc.detect(root);
 		if (!vcs) {
 			return yield* new VcsError({
 				message: "no .jj or .git — refuse auto-commit setup (init vcs first)",
@@ -93,8 +90,7 @@ export const startWorkflow = (
 		}
 
 		const allowDirty = params.allow_dirty === true;
-		// Phase 3: Config/Vcs service
-		if (!allowDirty && isDirty(root, vcs)) {
+		if (!allowDirty && (yield* vcsSvc.isDirty(root, vcs))) {
 			return yield* new GateRefused({
 				gate: "clean_tree",
 				message:
@@ -105,21 +101,8 @@ export const startWorkflow = (
 		const slug = params.slug?.trim() || slugify(params.goal);
 
 		if (vcs === "git") {
-			// Phase 3: Config/Vcs service
-			yield* Effect.try({
-				try: () => {
-					ensureGitBranch(root, slug);
-				},
-				catch: (e) =>
-					new VcsError({
-						message: e instanceof Error ? e.message : String(e),
-					}),
-			});
+			yield* vcsSvc.ensureGitBranch(root, slug);
 		}
-
-		// project config may already exist; do not invent cmds
-		yield* fs.exists(projectConfigPath(root));
-		// optional empty bindings file is fine to skip
 
 		const state: RunState = {
 			version: 1,

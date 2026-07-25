@@ -9,7 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { workflowStart } from "../adapters/start.ts";
 import { workflowStatus } from "../adapters/status.ts";
-import { workflowCommitPhase } from "./commit.ts";
+import { workflowCommitPhase } from "../adapters/commit.ts";
 import { workflowDispatch } from "./dispatch.ts";
 
 const dirs: string[] = [];
@@ -56,7 +56,7 @@ describe("workflow smoke", () => {
 			const again = await workflowStart({ goal: "nope" });
 			expect(again.ok).toBe(false);
 
-			const commit = workflowCommitPhase({});
+			const commit = await workflowCommitPhase({});
 			expect(commit.ok).toBe(false);
 
 			// dispatch without herdr still writes task

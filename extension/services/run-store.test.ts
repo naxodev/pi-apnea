@@ -131,6 +131,20 @@ describe("RunStore (fake FileSystem)", () => {
 		}).pipe(Effect.provide(layer));
 	});
 
+	itEffect("abandon succeeds on corrupt state.json without decoding", () => {
+		const root = "/proj";
+		const p = statePath(root);
+		const { fake, layer } = withFake({ [p]: "{not valid json" });
+		return Effect.gen(function* () {
+			const store = yield* RunStore;
+			const bak = yield* store.abandon(root);
+			expect(bak).toContain("state.json.abandoned.");
+			expect(fake.files.has(p)).toBe(false);
+			expect(fake.files.has(bak)).toBe(true);
+			expect(fake.files.get(bak)).toBe("{not valid json");
+		}).pipe(Effect.provide(layer));
+	});
+
 	itEffect("require fails NoRunState when missing", () => {
 		const { layer } = withFake();
 		return Effect.gen(function* () {

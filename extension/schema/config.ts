@@ -2,9 +2,11 @@ import { Result, Schema } from "effect";
 import { ConfigError } from "../errors.ts";
 import {
 	DEFAULT_TIMEOUTS,
+	ROLE_MODE,
 	type ApneaConfig,
 	type PaneStyle,
 	type Profile,
+	type Role,
 } from "../lib/types.ts";
 
 const StringArray = Schema.Array(Schema.String);
@@ -223,4 +225,67 @@ export function decodeProjectConfig(
 		return configFail(decoded.failure.message);
 	}
 	return Result.succeed(decoded.success);
+}
+
+/**
+ * Merge a validated project overlay onto a base config.
+ * Profiles always stay from the base (global-only).
+ */
+export function applyProjectConfig(
+	cfg: ApneaConfig,
+	overlay: typeof ProjectConfigSchema.Type,
+): ApneaConfig {
+	const roles = { ...cfg.roles };
+	if (overlay.roles) {
+		for (const [k, v] of Object.entries(overlay.roles)) {
+			roles[k] = { profile: v.profile };
+		}
+	}
+	const timeouts = { ...cfg.timeouts_ms };
+	if (overlay.timeouts_ms) {
+		for (const [k, v] of Object.entries(overlay.timeouts_ms)) {
+			if (typeof v === "number" && v >= 1000) timeouts[k] = v;
+		}
+	}
+	return {
+		profiles: cfg.profiles,
+		roles,
+		review_round_cap:
+			overlay.review_round_cap !== undefined
+				? overlay.review_round_cap
+				: cfg.review_round_cap,
+		timeouts_ms: timeouts,
+		pane_style:
+			overlay.pane_style !== undefined ? overlay.pane_style : cfg.pane_style,
+	};
+}
+
+/**
+ * Validate planner/reviewer/coder role→profile bindings and required cmds.
+ * Success returns cfg unchanged.
+ */
+export function validateRoleBindings(
+	cfg: ApneaConfig,
+): Result.Result<ApneaConfig, ConfigError> {
+	for (const role of ["planner", "reviewer", "coder"] as Role[]) {
+		const binding = cfg.roles[role];
+		if (!binding) {
+			return configFail(`config missing roles.${role}`);
+		}
+		const profile = cfg.profiles[binding.profile];
+		if (!profile) {
+			return configFail(
+				`roles.${role} profile "${binding.profile}" not defined in global profiles`,
+			);
+		}
+		const mode = ROLE_MODE[role];
+		const cmd =
+			mode === "oneshot" ? profile.cmd_oneshot : profile.cmd_interactive;
+		if (!cmd?.length) {
+			return configFail(
+				`profile "${binding.profile}" missing cmd_${mode} required by role ${role}`,
+			);
+		}
+	}
+	return Result.succeed(cfg);
 }

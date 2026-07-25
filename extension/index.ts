@@ -8,7 +8,7 @@ import { toolContent } from "./lib/result.ts";
 import type { ToolResult } from "./lib/types.ts";
 import { workflowStart } from "./adapters/start.ts";
 import { workflowResetRounds, workflowStatus } from "./adapters/status.ts";
-import { workflowCommitPhase } from "./tools/commit.ts";
+import { workflowCommitPhase } from "./adapters/commit.ts";
 import { workflowDispatch } from "./tools/dispatch.ts";
 import { workflowWait } from "./tools/wait.ts";
 
@@ -176,7 +176,7 @@ export default function (pi: ExtensionAPI) {
 			params: { message?: string; no_remaining_phases?: boolean },
 		) {
 			return toolContent(
-				workflowCommitPhase({
+				await workflowCommitPhase({
 					message: params.message,
 					no_remaining_phases: params.no_remaining_phases,
 				}),
