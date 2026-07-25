@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
-import { IllegalTool } from "./errors.ts";
-import { runTool } from "./run-tool.ts";
+import { GateRefused, IllegalTool } from "./errors.ts";
+import { runTool, runToolResult } from "./run-tool.ts";
 import { itEffect } from "./test/it-effect.ts";
 
 describe("runTool", () => {
@@ -44,6 +44,34 @@ describe("runTool", () => {
 		expect(out.details.ok).toBe(false);
 		if (!out.details.ok) {
 			expect(out.details.error).toBe("bug: kaboom");
+		}
+	});
+
+	test("runToolResult returns bare ToolResult", async () => {
+		const r = await runToolResult(
+			Effect.succeed({ ok: true as const, message: "plain" }),
+			Layer.empty,
+		);
+		expect(r).toEqual({ ok: true, message: "plain" });
+	});
+
+	test("GateRefused.details round-trips into ToolResult data", async () => {
+		const r = await runToolResult(
+			Effect.fail(
+				new GateRefused({
+					gate: "start",
+					message: "state.json already exists (step=planning). Use action=resume or action=abandon.",
+					details: { step: "planning", slug: "x" },
+				}),
+			),
+			Layer.empty,
+		);
+		expect(r.ok).toBe(false);
+		if (!r.ok) {
+			expect(r.error).toContain("already exists");
+			expect(r.data?.gate).toBe("start");
+			expect(r.data?.step).toBe("planning");
+			expect(r.data?.slug).toBe("x");
 		}
 	});
 });

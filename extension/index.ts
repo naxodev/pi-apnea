@@ -6,10 +6,10 @@ import { Type } from "typebox";
 import { registerApneaCommands } from "./commands.ts";
 import { toolContent } from "./lib/result.ts";
 import type { ToolResult } from "./lib/types.ts";
+import { workflowStart } from "./adapters/start.ts";
+import { workflowResetRounds, workflowStatus } from "./adapters/status.ts";
 import { workflowCommitPhase } from "./tools/commit.ts";
 import { workflowDispatch } from "./tools/dispatch.ts";
-import { workflowStart } from "./tools/start.ts";
-import { workflowResetRounds, workflowStatus } from "./tools/status.ts";
 import { workflowWait } from "./tools/wait.ts";
 
 const DispatchKind = Type.Union([
@@ -63,7 +63,7 @@ export default function (pi: ExtensionAPI) {
 				});
 			}
 			return toolContent(
-				workflowStart({
+				await workflowStart({
 					goal: params.goal ?? "",
 					slug: params.slug,
 					allow_dirty: params.allow_dirty,
@@ -191,7 +191,7 @@ export default function (pi: ExtensionAPI) {
 			"Read-only snapshot of run state and legal tools. Never mutates.",
 		parameters: Type.Object({}),
 		async execute() {
-			return toolContent(workflowStatus());
+			return toolContent(await workflowStatus());
 		},
 	});
 
@@ -206,7 +206,7 @@ export default function (pi: ExtensionAPI) {
 			}),
 		}),
 		async execute(_id: string, params: { gate: string }) {
-			return toolContent(workflowResetRounds({ gate: params.gate }));
+			return toolContent(await workflowResetRounds({ gate: params.gate }));
 		},
 	});
 }

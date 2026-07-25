@@ -66,6 +66,9 @@ export class GateRefused extends Schema.TaggedErrorClass<GateRefused>()(
 	{
 		gate: Schema.String,
 		message: Schema.String,
+		details: Schema.optional(
+			Schema.Record(Schema.String, Schema.Unknown),
+		),
 	},
 ) {}
 
@@ -186,7 +189,12 @@ export function toToolResult(e: AppError): ToolErr {
 				data: e.command !== undefined ? { command: e.command } : undefined,
 			});
 		case "GateRefused":
-			return err(e.message, { data: { gate: e.gate } });
+			return err(e.message, {
+				data: {
+					gate: e.gate,
+					...(e.details ?? {}),
+				},
+			});
 		case "WaitTimeout":
 			return err(
 				`timeout after ${e.timeoutMs}ms waiting for ${e.artifact}`,

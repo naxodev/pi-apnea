@@ -7,10 +7,10 @@ import { formatResult } from "./lib/result.ts";
 import { apneaSetup } from "./lib/setup.ts";
 import type { DispatchKind } from "./lib/state-machine.ts";
 import type { ToolResult } from "./lib/types.ts";
+import { workflowStart } from "./adapters/start.ts";
+import { workflowResetRounds, workflowStatus } from "./adapters/status.ts";
 import { workflowCommitPhase } from "./tools/commit.ts";
 import { workflowDispatch } from "./tools/dispatch.ts";
-import { workflowStart } from "./tools/start.ts";
-import { workflowResetRounds, workflowStatus } from "./tools/status.ts";
 import { workflowWait } from "./tools/wait.ts";
 
 const SUBS = [
@@ -211,7 +211,7 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 							);
 							return;
 						}
-						const r = workflowStart({
+						const r = await workflowStart({
 							goal,
 							slug,
 							allow_dirty:
@@ -224,18 +224,21 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 					}
 
 					case "resume": {
-						const r = workflowStart({ goal: "", action: "resume" });
+						const r = await workflowStart({ goal: "", action: "resume" });
 						notify(ctx, r);
 						if (r.ok) kick("resume");
 						return;
 					}
 
 					case "abandon":
-						notify(ctx, workflowStart({ goal: "", action: "abandon" }));
+						notify(
+							ctx,
+							await workflowStart({ goal: "", action: "abandon" }),
+						);
 						return;
 
 					case "status":
-						notify(ctx, workflowStatus());
+						notify(ctx, await workflowStatus());
 						return;
 
 					case "wait": {
@@ -290,7 +293,7 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 							ctx.ui.notify("Usage: /apnea reset-rounds <gate>", "error");
 							return;
 						}
-						notify(ctx, workflowResetRounds({ gate }));
+						notify(ctx, await workflowResetRounds({ gate }));
 						return;
 					}
 
@@ -306,7 +309,7 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 	// Short aliases that also show in `/` autocomplete
 	pi.registerCommand("apnea-status", {
 		description: "Apnea: read-only run status (alias of /apnea status)",
-		handler: async (_args, ctx) => notify(ctx, workflowStatus()),
+		handler: async (_args, ctx) => notify(ctx, await workflowStatus()),
 	});
 
 	pi.registerCommand("apnea-start", {
@@ -317,7 +320,7 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 				ctx.ui.notify("Usage: /apnea-start <goal>", "error");
 				return;
 			}
-			const r = workflowStart({ goal, action: "start" });
+			const r = await workflowStart({ goal, action: "start" });
 			notify(ctx, r);
 			if (r.ok) kick("start", goal);
 		},

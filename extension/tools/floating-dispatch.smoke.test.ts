@@ -8,10 +8,10 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { workflowStart } from "../adapters/start.ts";
 import { parseHerdrVersion, supportsFloating } from "../lib/herdr.ts";
 import { requireState } from "../lib/state.ts";
 import { workflowDispatch } from "./dispatch.ts";
-import { workflowStart } from "./start.ts";
 
 const dirs: string[] = [];
 const origCwd = process.cwd();
@@ -38,11 +38,11 @@ function gitRepo(): string {
 describe("floating dispatch smoke", () => {
 	test.skipIf(!insideHerdr)(
 		"floating plan dispatch preflight matches environment",
-		() => {
+		async () => {
 			const d = gitRepo();
 			process.chdir(d);
 
-			const s = workflowStart({
+			const s = await workflowStart({
 				goal: "floating smoke",
 				slug: "float-smoke",
 				allow_dirty: true,
