@@ -18,6 +18,7 @@ export type FakeHerdrOptions = {
 	interactive?: InteractiveLaunch | HerdrError;
 	failWriteScript?: HerdrError;
 	failOpenPane?: HerdrError;
+	linkResult?: { ok: boolean; raw: string };
 };
 
 export type FakeHerdrRecorder = {
@@ -35,6 +36,7 @@ export type FakeHerdrRecorder = {
 		prompt: string;
 		prefer: RolePaneRef | null;
 	}>;
+	linkedPlugins: string[];
 };
 
 /** Scriptable Herdr layer that records calls for assertions. */
@@ -47,6 +49,7 @@ export function fakeHerdrLayer(opts: FakeHerdrOptions = {}): {
 		scripts: [],
 		openedPanes: [],
 		interactiveCalls: [],
+		linkedPlugins: [],
 	};
 
 	const service: HerdrService = {
@@ -102,6 +105,12 @@ export function fakeHerdrLayer(opts: FakeHerdrOptions = {}): {
 					return yield* opts.failOpenPane;
 				}
 				recorder.openedPanes.push(taskScriptAbs);
+			}),
+
+		linkPlugin: (dir) =>
+			Effect.sync(() => {
+				recorder.linkedPlugins.push(dir);
+				return opts.linkResult ?? { ok: true, raw: "linked" };
 			}),
 	};
 

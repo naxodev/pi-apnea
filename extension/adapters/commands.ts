@@ -3,15 +3,15 @@
  * These call the same functions as the LLM tools — no workflow_* typing required.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { formatResult } from "./result.ts";
-import { apneaSetup } from "./lib/setup.ts";
-import type { DispatchKind } from "./domain/state-machine.ts";
-import type { ToolResult } from "./result.ts";
-import { workflowStart } from "./adapters/start.ts";
-import { workflowResetRounds, workflowStatus } from "./adapters/status.ts";
-import { workflowCommitPhase } from "./adapters/commit.ts";
-import { workflowDispatch } from "./adapters/dispatch.ts";
-import { workflowWait } from "./adapters/wait.ts";
+import { formatResult } from "../result.ts";
+import { apneaSetup } from "./setup.ts";
+import type { DispatchKind } from "../domain/state-machine.ts";
+import type { ToolResult } from "../result.ts";
+import { workflowStart } from "./start.ts";
+import { workflowResetRounds, workflowStatus } from "./status.ts";
+import { workflowCommitPhase } from "./commit.ts";
+import { workflowDispatch } from "./dispatch.ts";
+import { workflowWait } from "./wait.ts";
 
 const SUBS = [
 	"setup",
@@ -188,7 +188,7 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 					case "setup":
 						notify(
 							ctx,
-							apneaSetup({
+							await apneaSetup({
 								project: flags.has("project") || tokens.includes("--project"),
 								force: flags.has("force") || tokens.includes("--force"),
 							}),

@@ -6,11 +6,13 @@ export function makeFakeFileSystem(
 	initial: Record<string, string> = {},
 ): {
 	files: Map<string, string>;
+	modes: Map<string, number>;
 	layer: Layer.Layer<FileSystem>;
 } {
 	const files = new Map<string, string>(Object.entries(initial));
 	// Track directories created via mkdir (and implied by file writes).
 	const dirs = new Set<string>();
+	const modes = new Map<string, number>();
 
 	const ensureParent = (p: string) => {
 		const i = p.lastIndexOf("/");
@@ -52,10 +54,29 @@ export function makeFakeFileSystem(
 			Effect.sync(() => {
 				files.delete(path);
 			}),
+
+		copyDir: (from, to) =>
+			Effect.sync(() => {
+				dirs.add(to);
+				const prefix = `${from}/`;
+				for (const [key, value] of [...files.entries()]) {
+					if (key.startsWith(prefix)) {
+						const dest = `${to}/${key.slice(prefix.length)}`;
+						ensureParent(dest);
+						files.set(dest, value);
+					}
+				}
+			}),
+
+		chmod: (path, mode) =>
+			Effect.sync(() => {
+				modes.set(path, mode);
+			}),
 	};
 
 	return {
 		files,
+		modes,
 		layer: Layer.succeed(FileSystem, FileSystem.of(service)),
 	};
 }

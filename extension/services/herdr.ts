@@ -54,6 +54,7 @@ export interface HerdrService {
 		taskScriptAbs: string,
 		root: string,
 	) => Effect.Effect<void, HerdrError>;
+	readonly linkPlugin: (dir: string) => Effect.Effect<{ ok: boolean; raw: string }>;
 }
 
 export class Herdr extends Context.Service<Herdr, HerdrService>()(
@@ -237,19 +238,11 @@ function paneSendKeysSync(paneId: string, keys: string[]): void {
 	}
 }
 
-/**
- * Temporary sync probe for `lib/setup.ts`; Phase 6 moves setup onto the
- * `Herdr` service and makes this private again.
- */
-export function herdrVersionSync(): [number, number, number] | null {
+function herdrVersionSync(): [number, number, number] | null {
 	return parseHerdrVersion(herdrCli(["--version"]).raw);
 }
 
-/**
- * Temporary sync probe for `lib/setup.ts`; Phase 6 moves setup onto the
- * `Herdr` service and makes this private again.
- */
-export function hasApneaPluginSync(): boolean {
+function hasApneaPluginSync(): boolean {
 	const r = herdrCli(["plugin", "list", "--plugin", "apnea", "--json"]);
 	const json = r.json;
 	if (json) {
@@ -635,6 +628,12 @@ export const HerdrLive = Layer.effect(
 						}
 					},
 					catch: toHerdrError,
+				}),
+
+			linkPlugin: (dir) =>
+				Effect.sync(() => {
+					const r = herdrCli(["plugin", "link", dir]);
+					return { ok: r.ok, raw: r.raw };
 				}),
 		}),
 	),

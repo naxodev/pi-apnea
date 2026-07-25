@@ -3,7 +3,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { registerApneaCommands } from "./commands.ts";
+import { registerApneaCommands } from "./adapters/commands.ts";
 import { toolContent } from "./result.ts";
 import type { ToolResult } from "./result.ts";
 import { workflowStart } from "./adapters/start.ts";

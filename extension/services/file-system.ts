@@ -11,6 +11,8 @@ export interface FileSystemService {
 		opts?: { recursive?: boolean },
 	) => Effect.Effect<void>;
 	readonly remove: (path: string) => Effect.Effect<void>;
+	readonly copyDir: (from: string, to: string) => Effect.Effect<void>;
+	readonly chmod: (path: string, mode: number) => Effect.Effect<void>;
 }
 
 /**
@@ -60,6 +62,22 @@ export const FileSystemLive = Layer.succeed(
 			Effect.try({
 				try: () => {
 					fs.rmSync(path, { force: true });
+				},
+				catch: (e) => e,
+			}).pipe(Effect.orDie),
+
+		copyDir: (from, to) =>
+			Effect.try({
+				try: () => {
+					fs.cpSync(from, to, { recursive: true, force: true });
+				},
+				catch: (e) => e,
+			}).pipe(Effect.orDie),
+
+		chmod: (path, mode) =>
+			Effect.try({
+				try: () => {
+					fs.chmodSync(path, mode);
 				},
 				catch: (e) => e,
 			}).pipe(Effect.orDie),
