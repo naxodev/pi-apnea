@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { hasApneaPlugin, herdrVersion, supportsFloating } from "./herdr.ts";
 import { globalConfigPath, packageRoot, projectConfigPath } from "./paths.ts";
-import { materializePiRoleAgentDir } from "./pi-role-agent.ts";
+import { materializePiRoleAgentDir } from "../services/pi-role-agent.ts";
 import { err, ok } from "./result.ts";
 import type { ToolResult } from "./types.ts";
 

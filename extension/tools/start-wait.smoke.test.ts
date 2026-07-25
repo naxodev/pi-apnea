@@ -10,7 +10,7 @@ import * as path from "node:path";
 import { workflowStart } from "../adapters/start.ts";
 import { workflowStatus } from "../adapters/status.ts";
 import { workflowCommitPhase } from "../adapters/commit.ts";
-import { workflowDispatch } from "./dispatch.ts";
+import { workflowDispatch } from "../adapters/dispatch.ts";
 
 const dirs: string[] = [];
 const origCwd = process.cwd();
@@ -60,7 +60,7 @@ describe("workflow smoke", () => {
 			expect(commit.ok).toBe(false);
 
 			// dispatch without herdr still writes task
-			const disp = workflowDispatch({ kind: "plan" });
+			const disp = await workflowDispatch({ kind: "plan" });
 			expect(disp.ok).toBe(true);
 			if (disp.ok) {
 				expect(fs.existsSync(path.join(d, String(disp.data?.task)))).toBe(true);

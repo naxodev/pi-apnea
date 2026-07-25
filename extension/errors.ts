@@ -57,6 +57,9 @@ export class HerdrError extends Schema.TaggedErrorClass<HerdrError>()(
 	{
 		message: Schema.String,
 		command: Schema.optional(Schema.String),
+		details: Schema.optional(
+			Schema.Record(Schema.String, Schema.Unknown),
+		),
 	},
 ) {}
 
@@ -78,6 +81,9 @@ export class WaitTimeout extends Schema.TaggedErrorClass<WaitTimeout>()(
 	{
 		artifact: Schema.String,
 		timeoutMs: Schema.Number,
+		details: Schema.optional(
+			Schema.Record(Schema.String, Schema.Unknown),
+		),
 	},
 ) {}
 
@@ -86,6 +92,9 @@ export class WaitAborted extends Schema.TaggedErrorClass<WaitAborted>()(
 	"WaitAborted",
 	{
 		artifact: Schema.String,
+		details: Schema.optional(
+			Schema.Record(Schema.String, Schema.Unknown),
+		),
 	},
 ) {}
 
@@ -186,7 +195,13 @@ export function toToolResult(e: AppError): ToolErr {
 			});
 		case "HerdrError":
 			return err(e.message, {
-				data: e.command !== undefined ? { command: e.command } : undefined,
+				data:
+					e.command !== undefined || e.details !== undefined
+						? {
+								...(e.command !== undefined ? { command: e.command } : {}),
+								...(e.details ?? {}),
+							}
+						: undefined,
 			});
 		case "GateRefused":
 			return err(e.message, {
@@ -199,12 +214,16 @@ export function toToolResult(e: AppError): ToolErr {
 			return err(
 				`timeout after ${e.timeoutMs}ms waiting for ${e.artifact}`,
 				{
-					data: { artifact: e.artifact, timeout_ms: e.timeoutMs },
+					data: {
+						artifact: e.artifact,
+						timeout_ms: e.timeoutMs,
+						...(e.details ?? {}),
+					},
 				},
 			);
 		case "WaitAborted":
 			return err("workflow_wait aborted (Esc / cancel)", {
-				data: { artifact: e.artifact },
+				data: { artifact: e.artifact, ...(e.details ?? {}) },
 			});
 		case "ArtifactInvalid":
 			return err(e.message, { data: { artifact: e.artifact } });

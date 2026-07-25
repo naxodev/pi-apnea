@@ -11,7 +11,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { globalConfigPath } from "./paths.ts";
+import { globalConfigPath } from "../domain/paths.ts";
 
 const PI_VIMMODE_MARKERS = ["pi-vimmode", "pekochan069/pi-vimmode"];
 

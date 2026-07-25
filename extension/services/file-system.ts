@@ -10,6 +10,7 @@ export interface FileSystemService {
 		path: string,
 		opts?: { recursive?: boolean },
 	) => Effect.Effect<void>;
+	readonly remove: (path: string) => Effect.Effect<void>;
 }
 
 /**
@@ -51,6 +52,14 @@ export const FileSystemLive = Layer.succeed(
 			Effect.try({
 				try: () => {
 					fs.mkdirSync(path, { recursive: opts?.recursive ?? true });
+				},
+				catch: (e) => e,
+			}).pipe(Effect.orDie),
+
+		remove: (path) =>
+			Effect.try({
+				try: () => {
+					fs.rmSync(path, { force: true });
 				},
 				catch: (e) => e,
 			}).pipe(Effect.orDie),

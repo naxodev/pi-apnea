@@ -11,7 +11,7 @@ import * as path from "node:path";
 import { workflowStart } from "../adapters/start.ts";
 import { parseHerdrVersion, supportsFloating } from "../lib/herdr.ts";
 import { requireState } from "../lib/state.ts";
-import { workflowDispatch } from "./dispatch.ts";
+import { workflowDispatch } from "../adapters/dispatch.ts";
 
 const dirs: string[] = [];
 const origCwd = process.cwd();
@@ -55,7 +55,7 @@ describe("floating dispatch smoke", () => {
 				JSON.stringify({ pane_style: "floating" }),
 			);
 
-			const disp = workflowDispatch({ kind: "plan" });
+			const disp = await workflowDispatch({ kind: "plan" });
 			const verRaw = spawnSync("herdr", ["--version"], { encoding: "utf8" });
 			const version = parseHerdrVersion(
 				`${verRaw.stdout ?? ""}${verRaw.stderr ?? ""}`,

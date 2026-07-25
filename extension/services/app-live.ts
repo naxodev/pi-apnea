@@ -1,6 +1,7 @@
 import { Layer } from "effect";
 import { ConfigLive } from "./config.ts";
 import { FileSystemLive } from "./file-system.ts";
+import { HerdrLive } from "./herdr.ts";
 import { RunStoreLive } from "./run-store.ts";
 import { VcsLive } from "./vcs.ts";
 
@@ -9,6 +10,6 @@ import { VcsLive } from "./vcs.ts";
  * inside runTool — no module-level ManagedRuntime.
  */
 export const AppLive = Layer.provideMerge(
-	Layer.mergeAll(RunStoreLive, ConfigLive, VcsLive),
+	Layer.mergeAll(RunStoreLive, ConfigLive, VcsLive, HerdrLive),
 	FileSystemLive,
 );

@@ -9,8 +9,8 @@ import type { ToolResult } from "./lib/types.ts";
 import { workflowStart } from "./adapters/start.ts";
 import { workflowResetRounds, workflowStatus } from "./adapters/status.ts";
 import { workflowCommitPhase } from "./adapters/commit.ts";
-import { workflowDispatch } from "./tools/dispatch.ts";
-import { workflowWait } from "./tools/wait.ts";
+import { workflowDispatch } from "./adapters/dispatch.ts";
+import { workflowWait } from "./adapters/wait.ts";
 
 const DispatchKind = Type.Union([
 	Type.Literal("plan"),
@@ -104,7 +104,7 @@ export default function (pi: ExtensionAPI) {
 			},
 		) {
 			return toolContent(
-				workflowDispatch({
+				await workflowDispatch({
 					kind: params.kind,
 					task_markdown: params.task_markdown,
 					rework: params.rework,

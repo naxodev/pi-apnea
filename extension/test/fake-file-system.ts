@@ -47,6 +47,11 @@ export function makeFakeFileSystem(
 			Effect.sync(() => {
 				dirs.add(path);
 			}),
+
+		remove: (path) =>
+			Effect.sync(() => {
+				files.delete(path);
+			}),
 	};
 
 	return {

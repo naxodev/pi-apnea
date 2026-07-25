@@ -2,8 +2,22 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { isPiCmd, wrapInteractiveCmdNoVim } from "./pi-role-agent.ts";
-import type { PaneStyle, Role } from "./types.ts";
+import {
+	effectivePaneStyle,
+	floatingTaskScriptBody,
+	parseHerdrVersion,
+	shellJoin,
+	supportsFloating as domainSupportsFloating,
+	versionGte,
+} from "../domain/herdr.ts";
+import { isPiCmd, wrapInteractiveCmdNoVim } from "../services/pi-role-agent.ts";
+
+export {
+	effectivePaneStyle,
+	parseHerdrVersion,
+	shellJoin,
+	versionGte,
+};
 
 export function herdrEnabled(): boolean {
 	return process.env.HERDR_ENV === "1";
@@ -288,16 +302,6 @@ export function acquireRolePane(
 	return { pane_id: paneId, label, reused: false };
 }
 
-export function shellJoin(parts: string[]): string {
-	return parts
-		.map((p) => {
-			if (p === "&&" || p === "|" || p === "exec" || p === "env") return p;
-			if (/^[A-Za-z0-9_./:=,@+-]+$/.test(p)) return p;
-			return `'${p.replace(/'/g, `'\\''`)}'`;
-		})
-		.join(" ");
-}
-
 /**
  * Open the interactive harness TUI in a pane (or reuse), wait until idle,
  * then submit a short pointer prompt via `pane run` (text + Enter).
@@ -372,26 +376,6 @@ export function runInteractivePrompt(
 	};
 }
 
-/** Parse `herdr X.Y.Z` (or noisy multi-line) into a numeric tuple. */
-export function parseHerdrVersion(
-	raw: string,
-): [number, number, number] | null {
-	const m = raw.match(/(\d+)\.(\d+)\.(\d+)/);
-	if (!m) return null;
-	return [Number(m[1]), Number(m[2]), Number(m[3])];
-}
-
-export function versionGte(
-	a: [number, number, number],
-	b: [number, number, number],
-): boolean {
-	const [a0, a1, a2] = a;
-	const [b0, b1, b2] = b;
-	if (a0 !== b0) return a0 > b0;
-	if (a1 !== b1) return a1 > b1;
-	return a2 >= b2;
-}
-
 /** Run `herdr --version` (plain text, not JSON). */
 export function herdrVersion(): [number, number, number] | null {
 	const r = herdr(["--version"]);
@@ -405,7 +389,7 @@ export function herdrVersion(): [number, number, number] | null {
 export function supportsFloating(
 	version: [number, number, number] | null = herdrVersion(),
 ): boolean {
-	return version != null && versionGte(version, [0, 7, 4]);
+	return domainSupportsFloating(version);
 }
 
 /** True iff the linked `apnea` herdr plugin is present. */
@@ -533,22 +517,7 @@ export function writeFloatingTaskScript(
 	// No `exec`: EXIT trap must run after the oneshot exits (Hangup included).
 	// End-of-options `--` before the prompt so variadic flags like Claude's
 	// `--allowedTools <tools...>` cannot swallow the prompt as another tool.
-	const body = [
-		"#!/bin/bash",
-		"set -uo pipefail",
-		`EXIT_FILE=${shellJoin([exitFileAbs])}`,
-		"write_exit() {",
-		"  local st=$?",
-		`  printf '%s\n' "$st" > "$EXIT_FILE" 2>/dev/null || true`,
-		"}",
-		"trap write_exit EXIT",
-		"trap 'exit 129' HUP",
-		"trap 'exit 130' INT",
-		"trap 'exit 143' TERM",
-		shellJoin(["cd", root]),
-		shellJoin([...resolvedCmd, "--", prompt]),
-		"",
-	].join("\n");
+	const body = floatingTaskScriptBody({ root, resolvedCmd, prompt, exitFileAbs });
 	fs.writeFileSync(scriptAbs, body, "utf8");
 	fs.chmodSync(scriptAbs, 0o755);
 }
@@ -584,23 +553,6 @@ export function openFloatingPane(taskScriptAbs: string, _root: string): void {
 		}
 		throw new Error(`herdr plugin pane open failed: ${raw || r.raw}`);
 	}
-}
-
-/**
- * Configured style vs effective style. Floating is only for planner/reviewer
- * (oneshot-eligible artifact producers); interactive roles always stay regular.
- */
-export function effectivePaneStyle(
-	configured: PaneStyle,
-	role: Role,
-): { style: PaneStyle; effective: string } {
-	if (configured === "regular") {
-		return { style: "regular", effective: "regular" };
-	}
-	if (role === "planner" || role === "reviewer") {
-		return { style: "floating", effective: "floating" };
-	}
-	return { style: "regular", effective: "regular (interactive role)" };
 }
 
 export function sleepMs(ms: number): void {
