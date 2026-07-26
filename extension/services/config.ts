@@ -11,6 +11,7 @@ import {
 	applyProjectConfig,
 	decodeGlobalConfig,
 	decodeProjectConfig,
+	resolveRoleCmdResult,
 	validateRoleBindings,
 } from "../schema/config.ts";
 import { FileSystem } from "./file-system.ts";
@@ -90,26 +91,11 @@ export const ConfigLive = Layer.effect(
 			mode: RoleMode = ROLE_MODE[role],
 		): Effect.Effect<string[], ConfigError> =>
 			Effect.gen(function* () {
-				const binding = cfg.roles[role];
-				if (!binding) {
-					return yield* new ConfigError({
-						message: `no role binding for ${role}`,
-					});
+				const resolved = resolveRoleCmdResult(cfg, role, mode);
+				if (Result.isFailure(resolved)) {
+					return yield* resolved.failure;
 				}
-				const profile = cfg.profiles[binding.profile];
-				if (!profile) {
-					return yield* new ConfigError({
-						message: `unknown profile ${binding.profile}`,
-					});
-				}
-				const cmd =
-					mode === "oneshot" ? profile.cmd_oneshot : profile.cmd_interactive;
-				if (!cmd?.length) {
-					return yield* new ConfigError({
-						message: `profile ${binding.profile} has no cmd_${mode}`,
-					});
-				}
-				return [...cmd];
+				return resolved.success;
 			});
 
 		return Config.of({ load, resolveRoleCmd });

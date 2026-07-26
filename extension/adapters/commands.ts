@@ -198,8 +198,8 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 						notify(
 							ctx,
 							await apneaSetup({
-								project: flags.has("project") || tokens.includes("--project"),
-								force: flags.has("force") || tokens.includes("--force"),
+								project: flags.has("project"),
+								force: flags.has("force"),
 							}),
 						);
 						return;
@@ -218,8 +218,7 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 						const r = await workflowStart({
 							goal,
 							slug,
-							allow_dirty:
-								flags.has("allow-dirty") || tokens.includes("--allow-dirty"),
+							allow_dirty: flags.has("allow-dirty"),
 							action: "start",
 						});
 						notify(ctx, r);
@@ -273,7 +272,7 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 							ctx,
 							await workflowDispatch({
 								kind,
-								rework: flags.has("rework") || tokens.includes("--rework"),
+								rework: flags.has("rework"),
 							}),
 						);
 						return;
@@ -289,8 +288,7 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 							ctx,
 							await workflowCommitPhase({
 								message,
-								no_remaining_phases:
-									flags.has("done") || tokens.includes("--done"),
+								no_remaining_phases: flags.has("done"),
 							}),
 						);
 						return;

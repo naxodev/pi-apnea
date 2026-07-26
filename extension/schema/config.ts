@@ -7,6 +7,7 @@ import {
 	type PaneStyle,
 	type Profile,
 	type Role,
+	type RoleMode,
 } from "../domain/types.ts";
 
 const StringArray = Schema.Array(Schema.String);
@@ -253,6 +254,35 @@ export function applyProjectConfig(
 		pane_style:
 			overlay.pane_style !== undefined ? overlay.pane_style : cfg.pane_style,
 	};
+}
+
+/**
+ * Resolve role → profile → `cmd_<mode>`. Shared by `ConfigLive` and the test
+ * fake so tests exercise the real resolution instead of a copy of it.
+ *
+ * Deliberately distinct from `validateRoleBindings` below: this is the runtime
+ * lookup, that one is the setup-time audit and phrases the same failures as
+ * actionable config guidance.
+ */
+export function resolveRoleCmdResult(
+	cfg: ApneaConfig,
+	role: Role,
+	mode: RoleMode = ROLE_MODE[role],
+): Result.Result<string[], ConfigError> {
+	const binding = cfg.roles[role];
+	if (!binding) {
+		return configFail(`no role binding for ${role}`);
+	}
+	const profile = cfg.profiles[binding.profile];
+	if (!profile) {
+		return configFail(`unknown profile ${binding.profile}`);
+	}
+	const cmd =
+		mode === "oneshot" ? profile.cmd_oneshot : profile.cmd_interactive;
+	if (!cmd?.length) {
+		return configFail(`profile ${binding.profile} has no cmd_${mode}`);
+	}
+	return Result.succeed([...cmd]);
 }
 
 /**

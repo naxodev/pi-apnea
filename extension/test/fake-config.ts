@@ -1,11 +1,7 @@
-import { Effect, Layer } from "effect";
-import { ConfigError } from "../errors.ts";
-import {
-	ROLE_MODE,
-	type ApneaConfig,
-	type Role,
-	type RoleMode,
-} from "../domain/types.ts";
+import { Effect, Layer, Result } from "effect";
+import type { ConfigError } from "../errors.ts";
+import { ROLE_MODE, type ApneaConfig, type Role } from "../domain/types.ts";
+import { resolveRoleCmdResult } from "../schema/config.ts";
 import { Config, type ConfigService } from "../services/config.ts";
 
 export type FakeConfigOptions = {
@@ -42,29 +38,17 @@ export function fakeConfigLayer(
 			options.failLoad
 				? Effect.fail(options.failLoad)
 				: Effect.succeed(cfg),
+		// Only `load` is faked. Role→cmd resolution delegates to the same pure
+		// function ConfigLive uses: a hand-copied resolver here would make every
+		// dispatch test assert against the copy, so a real resolution bug could
+		// not fail any test.
 		resolveRoleCmd: (c, role, mode = ROLE_MODE[role as Role]) =>
 			Effect.gen(function* () {
-				const binding = c.roles[role];
-				if (!binding) {
-					return yield* new ConfigError({
-						message: `no role binding for ${role}`,
-					});
+				const resolved = resolveRoleCmdResult(c, role, mode);
+				if (Result.isFailure(resolved)) {
+					return yield* resolved.failure;
 				}
-				const profile = c.profiles[binding.profile];
-				if (!profile) {
-					return yield* new ConfigError({
-						message: `unknown profile ${binding.profile}`,
-					});
-				}
-				const m: RoleMode = mode;
-				const cmd =
-					m === "oneshot" ? profile.cmd_oneshot : profile.cmd_interactive;
-				if (!cmd?.length) {
-					return yield* new ConfigError({
-						message: `profile ${binding.profile} has no cmd_${m}`,
-					});
-				}
-				return [...cmd];
+				return resolved.success;
 			}),
 	};
 
