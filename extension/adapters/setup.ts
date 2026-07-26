@@ -1,13 +1,17 @@
-import { spawnSync } from "node:child_process";
 import type { ToolResult } from "../result.ts";
 import { runToolResult } from "../run-tool.ts";
 import { AppLive } from "../services/app-live.ts";
+import { resolveExecutable } from "../services/herdr.ts";
 import { materializePiRoleAgentDir } from "../services/pi-role-agent.ts";
 import { setupWorkflow, type SetupDeps, type SetupParams } from "../workflows/setup.ts";
 
+/**
+ * Walk PATH directly rather than spawning `which` once per binary — `which`
+ * itself is absent from minimal environments, which would report every
+ * harness as missing.
+ */
 function onPath(bin: string): boolean {
-	const r = spawnSync("which", [bin], { encoding: "utf8" });
-	return r.status === 0 && Boolean(r.stdout?.trim());
+	return resolveExecutable(bin) !== null;
 }
 
 const prodDeps: SetupDeps = {

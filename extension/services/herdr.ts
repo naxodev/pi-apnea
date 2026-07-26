@@ -345,9 +345,12 @@ function waitAgentReady(
 			const s = paneGetSync(paneId).agent_status;
 			if (s === "idle" || s === "done") return s;
 		}
-		// fall back: poll (done also counts as ready)
-		const deadline = Date.now() + Math.min(timeoutMs, 30_000);
-		while (Date.now() < deadline) {
+		// fall back: poll (done also counts as ready). Clock, not Date.now(): the
+		// sleep below is virtualized under TestClock, so a wall-clock deadline
+		// would never be reached in a test.
+		const deadline =
+			(yield* Clock.currentTimeMillis) + Math.min(timeoutMs, 30_000);
+		while ((yield* Clock.currentTimeMillis) < deadline) {
 			const s = paneGetSync(paneId).agent_status;
 			if (s === "idle" || s === "done") return s;
 			yield* Effect.sleep(500);
@@ -374,8 +377,8 @@ export function ensurePromptSubmitted(
 
 		const waitForWorking = (ms: number): Effect.Effect<string | undefined> =>
 			Effect.gen(function* () {
-				const deadline = Date.now() + ms;
-				while (Date.now() < deadline) {
+				const deadline = (yield* Clock.currentTimeMillis) + ms;
+				while ((yield* Clock.currentTimeMillis) < deadline) {
 					const s = paneGetSync(paneId).agent_status;
 					if (s === "working" || s === "blocked") return s;
 					yield* Effect.sleep(400);
@@ -506,14 +509,14 @@ function runInteractivePromptImpl(
 ): Effect.Effect<InteractiveLaunch, HerdrError> {
 	return Effect.gen(function* () {
 		let preferUse: RolePaneRef | null = null;
-		if (prefer?.pane_id && paneAliveSync(prefer.pane_id)) {
+		if (prefer?.pane_id) {
+			// One `pane get`: liveness and agent_status come from the same call.
 			const info = paneGetSync(prefer.pane_id);
-			const st = info.agent_status;
 			// reuse only when a live agent can take a new prompt
-			if (st === "idle" || st === "done") {
+			// working/blocked/unknown/shell-only → new pane
+			if (info.ok && (info.agent_status === "idle" || info.agent_status === "done")) {
 				preferUse = prefer;
 			}
-			// working/blocked/unknown/shell-only → new pane
 		}
 
 		const acquired = yield* acquireRolePane(role, {

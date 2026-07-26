@@ -34,6 +34,19 @@ export type DispatchParams = {
 	rework?: boolean;
 };
 
+/**
+ * Timeout budget key per kind — the step the kind runs *during*, which is why
+ * these are step names rather than kind names.
+ */
+const TIMEOUT_KEY_BY_KIND: Record<DispatchKind, string> = {
+	plan: "planning",
+	plan_review: "plan_review",
+	phase_package: "phase_packaging",
+	code: "coding",
+	code_review: "code_review",
+	pr_description: "finishing",
+};
+
 function taskBody(opts: {
 	kind: DispatchKind;
 	role: Role;
@@ -290,8 +303,6 @@ export const dispatchWorkflow = (
 			pane_style_effective: paneStyle.effective,
 		};
 
-		if (!state.role_panes) state.role_panes = {};
-
 		if (!(yield* herdr.enabled)) {
 			state.pending_artifact = artifactRel;
 			state.pending_role = role;
@@ -396,18 +407,7 @@ export const dispatchWorkflow = (
 		state.pending_role = role;
 		yield* store.save(state, root);
 
-		const timeoutKey =
-			params.kind === "plan"
-				? "planning"
-				: params.kind === "plan_review"
-					? "plan_review"
-					: params.kind === "phase_package"
-						? "phase_packaging"
-						: params.kind === "code"
-							? "coding"
-							: params.kind === "code_review"
-								? "code_review"
-								: "finishing";
+		const timeoutKey = TIMEOUT_KEY_BY_KIND[params.kind];
 
 		return ok(`dispatched ${params.kind} → ${role} artifact=${artifactRel}`, {
 			task: rel(taskFile, root),

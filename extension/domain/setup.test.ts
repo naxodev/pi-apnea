@@ -114,6 +114,9 @@ describe("buildGlobalConfig", () => {
 
 		const withoutPrev = buildGlobalConfig({ has: detected(), prev: {}, force: false });
 		expect(withoutPrev.review_round_cap).toBe(3);
+		// Literal on purpose: the written template seeds from DEFAULT_TIMEOUTS, so
+		// asserting against that constant would make this test unable to notice a
+		// change to the defaults. Editing this list should be a deliberate act.
 		expect(withoutPrev.timeouts_ms).toEqual({
 			planning: 1_500_000,
 			plan_review: 900_000,
@@ -121,6 +124,8 @@ describe("buildGlobalConfig", () => {
 			coding: 2_700_000,
 			code_review: 900_000,
 			verify: 900_000,
+			finishing: 900_000,
+			default: 900_000,
 		});
 	});
 

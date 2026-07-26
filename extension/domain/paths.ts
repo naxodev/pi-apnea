@@ -76,7 +76,3 @@ export function packageRoot(): string {
 	// extension/domain -> package root (same depth as extension/lib)
 	return path.resolve(here, "..", "..");
 }
-
-export function briefPath(role: string): string {
-	return path.join(packageRoot(), "briefs", `${role}.md`);
-}

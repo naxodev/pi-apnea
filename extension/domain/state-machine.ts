@@ -100,12 +100,6 @@ export function allowedKinds(step: Step): DispatchKind[] {
 	}
 }
 
-export function stepAfterDispatch(kind: DispatchKind, step: Step): Step {
-	// dispatch does not always change step; wait does for completion
-	void kind;
-	return step;
-}
-
 export function stepAfterArtifact(
 	kind: DispatchKind,
 	verdict: string | undefined,

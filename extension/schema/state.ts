@@ -1,5 +1,4 @@
 import { Result, Schema } from "effect";
-import { DISPATCH_KINDS } from "../domain/state-machine.ts";
 import { StateCorrupt } from "../errors.ts";
 import type { RunState, Step } from "../domain/types.ts";
 
@@ -13,8 +12,6 @@ export const StepSchema = Schema.Literals([
 	"finishing",
 	"done",
 ] as const);
-
-export const DispatchKindSchema = Schema.Literals(DISPATCH_KINDS);
 
 export const VcsBackendSchema = Schema.Literals(["jj", "git"] as const);
 

@@ -1,8 +1,6 @@
 import { Cause, Effect, Exit, Layer, Option, Result } from "effect";
 import { isAppError, toToolResult } from "./errors.ts";
-import { toolContent, type ToolResult } from "./result.ts";
-
-export type ToolContent = ReturnType<typeof toolContent>;
+import type { ToolResult } from "./result.ts";
 
 /**
  * Per-call runner (no toolContent wrap): provide `layer`, map AppError →
@@ -35,17 +33,6 @@ export async function runToolResult<E, R>(
 		? defectMessage(defect.success)
 		: defectMessage(Cause.squash(exit.cause));
 	return { ok: false, error: `bug: ${msg}` };
-}
-
-/**
- * Per-call runner: provide `layer`, map AppError → ToolResult, defects → bug:.
- * No module-level ManagedRuntime — fresh provide each call.
- */
-export async function runTool<E, R>(
-	effect: Effect.Effect<ToolResult, E, R>,
-	layer: Layer.Layer<R, never, never>,
-): Promise<ToolContent> {
-	return toolContent(await runToolResult(effect, layer));
 }
 
 function defectMessage(defect: unknown): string {

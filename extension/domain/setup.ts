@@ -1,3 +1,5 @@
+import { DEFAULT_TIMEOUTS } from "./types.ts";
+
 export type Detected = {
 	pi: boolean;
 	claude: boolean;
@@ -116,14 +118,9 @@ export function buildGlobalConfig(opts: {
 		timeouts_ms:
 			prev.timeouts_ms && typeof prev.timeouts_ms === "object"
 				? prev.timeouts_ms
-				: {
-						planning: 1_500_000,
-						plan_review: 900_000,
-						phase_packaging: 900_000,
-						coding: 2_700_000,
-						code_review: 900_000,
-						verify: 900_000,
-					},
+				: // Seed from the runtime defaults so the written template and the
+					// values wait/commit actually use cannot drift apart.
+					{ ...DEFAULT_TIMEOUTS },
 	};
 	// Preserve user opt-in only — never introduce pane_style when absent.
 	if (preservedPaneStyle !== undefined) {

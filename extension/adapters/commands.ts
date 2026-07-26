@@ -123,20 +123,12 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 			const sub = parts[0];
 			if (sub === "dispatch") {
 				const p = parts[1] ?? "";
+				// Complete the kind token only — Pi replaces the last token.
 				const hits = DISPATCH_KINDS.filter((k) => k.startsWith(p)).map((k) => ({
-					value: `${sub} ${k}`.slice(sub.length + 1), // complete kind only? Pi may replace last token
+					value: k,
 					label: k,
 				}));
-				// Prefer completing just the kind token
-				const kindHits = DISPATCH_KINDS.filter((k) => k.startsWith(p)).map(
-					(k) => ({
-						value: k,
-						label: k,
-					}),
-				);
-				if (kindHits.length) return kindHits;
-				if (hits.length) return hits;
-				return null;
+				return hits.length ? hits : null;
 			}
 			if (sub === "setup") {
 				const p = parts[1] ?? "";
