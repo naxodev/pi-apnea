@@ -10,11 +10,10 @@ export type ToolContent = ReturnType<typeof toolContent>;
  */
 export async function runToolResult<E, R>(
 	effect: Effect.Effect<ToolResult, E, R>,
-	layer: Layer.Layer<R, never, never> = Layer.empty as Layer.Layer<
-		R,
-		never,
-		never
-	>,
+	// Required: a defaulted `Layer.empty as Layer.Layer<R>` erases R, so calling
+	// without the layer would type-check and then die as a service-not-found
+	// defect on every invocation. Pass `Layer.empty` explicitly when R is never.
+	layer: Layer.Layer<R, never, never>,
 ): Promise<ToolResult> {
 	const provided = Effect.provide(effect, layer) as Effect.Effect<
 		ToolResult,
@@ -44,11 +43,7 @@ export async function runToolResult<E, R>(
  */
 export async function runTool<E, R>(
 	effect: Effect.Effect<ToolResult, E, R>,
-	layer: Layer.Layer<R, never, never> = Layer.empty as Layer.Layer<
-		R,
-		never,
-		never
-	>,
+	layer: Layer.Layer<R, never, never>,
 ): Promise<ToolContent> {
 	return toolContent(await runToolResult(effect, layer));
 }

@@ -51,13 +51,21 @@ export const LEGAL_TOOLS: Record<
 
 export type ToolName = (typeof LEGAL_TOOLS)[Step][number];
 
-export type DispatchKind =
-	| "plan"
-	| "plan_review"
-	| "phase_package"
-	| "code"
-	| "code_review"
-	| "pr_description";
+/**
+ * Single source of truth for dispatch kinds — the Pi tool param schema
+ * (`extension/index.ts`), the `state.json` codec (`schema/state.ts`) and the
+ * `/apnea dispatch` completion list all derive from this tuple.
+ */
+export const DISPATCH_KINDS = [
+	"plan",
+	"plan_review",
+	"phase_package",
+	"code",
+	"code_review",
+	"pr_description",
+] as const;
+
+export type DispatchKind = (typeof DISPATCH_KINDS)[number];
 
 export function expectedRole(kind: DispatchKind): Role {
 	switch (kind) {

@@ -22,19 +22,18 @@ const RoleBindingSchema = Schema.Struct({
 
 const PaneStyleSchema = Schema.Literals(["regular", "floating"] as const);
 
-/** Mirrors `schemas/config.schema.json` top-level keys. */
+/**
+ * Mirrors `schemas/config.schema.json` top-level keys.
+ *
+ * `review_round_cap` / `timeouts_ms` carry no range `check`: an out-of-range
+ * number must fall back to the default (see below), not fail the decode. A
+ * hard failure here bricks every tool until the file is hand-edited.
+ */
 export const GlobalConfigSchema = Schema.Struct({
 	profiles: Schema.optional(Schema.Record(Schema.String, ProfileSchema)),
 	roles: Schema.optional(Schema.Record(Schema.String, RoleBindingSchema)),
-	review_round_cap: Schema.optional(
-		Schema.Number.check(Schema.isGreaterThanOrEqualTo(1)),
-	),
-	timeouts_ms: Schema.optional(
-		Schema.Record(
-			Schema.String,
-			Schema.Number.check(Schema.isGreaterThanOrEqualTo(1000)),
-		),
-	),
+	review_round_cap: Schema.optional(Schema.Number),
+	timeouts_ms: Schema.optional(Schema.Record(Schema.String, Schema.Number)),
 	pane_style: Schema.optional(PaneStyleSchema),
 });
 
@@ -54,18 +53,14 @@ const PROJECT_FORBIDDEN = new Set([
 	"profiles",
 ]);
 
-/** Project overlay — unknown keys and profile-owned keys fail decode. */
+/**
+ * Project overlay — unknown keys and profile-owned keys fail decode.
+ * Range-tolerant for the same reason as `GlobalConfigSchema`.
+ */
 export const ProjectConfigSchema = Schema.Struct({
 	roles: Schema.optional(Schema.Record(Schema.String, RoleBindingSchema)),
-	review_round_cap: Schema.optional(
-		Schema.Number.check(Schema.isGreaterThanOrEqualTo(1)),
-	),
-	timeouts_ms: Schema.optional(
-		Schema.Record(
-			Schema.String,
-			Schema.Number.check(Schema.isGreaterThanOrEqualTo(1000)),
-		),
-	),
+	review_round_cap: Schema.optional(Schema.Number),
+	timeouts_ms: Schema.optional(Schema.Record(Schema.String, Schema.Number)),
 	isolation: Schema.optional(Schema.Literal("shared_cwd")),
 	pane_style: Schema.optional(PaneStyleSchema),
 });
@@ -251,7 +246,7 @@ export function applyProjectConfig(
 		profiles: cfg.profiles,
 		roles,
 		review_round_cap:
-			overlay.review_round_cap !== undefined
+			overlay.review_round_cap !== undefined && overlay.review_round_cap >= 1
 				? overlay.review_round_cap
 				: cfg.review_round_cap,
 		timeouts_ms: timeouts,

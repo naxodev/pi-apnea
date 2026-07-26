@@ -167,6 +167,11 @@ describe("commitWorkflow (fake layers)", () => {
 					if (r.failure._tag === "VerifyFailed") {
 						expect(r.failure.commands.length).toBeGreaterThan(0);
 						expect(r.failure.outputs[0]).toContain("exit=1");
+						// outputs is only the last 2000 chars — a real tsc/test failure
+						// overflows it, so the caller must be told where the full log is.
+						expect(r.failure.verify_log).toBe(
+							".apnea/artifacts/phase-01/round-1/verify.log",
+						);
 					}
 				}
 				// verify.log next to review

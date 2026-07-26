@@ -289,6 +289,32 @@ function toHerdrError(e: unknown): HerdrError {
 		: new HerdrError({ message: e instanceof Error ? e.message : String(e) });
 }
 
+/**
+ * Effect wrappers for the throwing `*Sync` helpers. A `throw` inside
+ * `Effect.gen` is a defect, and defects pass straight through `Effect.ignore` /
+ * `Effect.option` — so every sync herdr call must go through `Effect.try` for
+ * best-effort recovery blocks to actually be best-effort.
+ */
+function paneRun(
+	paneId: string,
+	command: string,
+): Effect.Effect<void, HerdrError> {
+	return Effect.try({
+		try: () => paneRunSync(paneId, command),
+		catch: toHerdrError,
+	});
+}
+
+function sendKeys(
+	paneId: string,
+	keys: string[],
+): Effect.Effect<void, HerdrError> {
+	return Effect.try({
+		try: () => paneSendKeysSync(paneId, keys),
+		catch: toHerdrError,
+	});
+}
+
 /** Unique label for a role slot (stable for the run when we reuse the pane). */
 function roleLabel(role: string, millis: number): string {
 	const id = `${millis.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -336,7 +362,7 @@ function waitAgentReady(
  * pi+vim can leave the prompt in INSERT mode. Recover with Escape+Enter
  * (then one full re-submit) before giving up.
  */
-function ensurePromptSubmitted(
+export function ensurePromptSubmitted(
 	paneId: string,
 	prompt: string,
 	opts?: { settleMs?: number; workingWaitMs?: number },
@@ -366,12 +392,15 @@ function ensurePromptSubmitted(
 
 		// Paste often lands without submit — Enter alone recovers Claude;
 		// Escape first exits pi-vim INSERT so Enter can actually submit.
+		// `*Sync` helpers throw, and a throw inside Effect.gen is a *defect* that
+		// Effect.ignore/Effect.option do not catch — wrap in Effect.try so a dead
+		// pane stays best-effort instead of aborting dispatch before state is saved.
 		attempts += 1;
 		yield* Effect.ignore(
 			Effect.gen(function* () {
-				paneSendKeysSync(paneId, ["Escape"]);
+				yield* sendKeys(paneId, ["Escape"]);
 				yield* Effect.sleep(150);
-				paneSendKeysSync(paneId, ["Enter"]);
+				yield* sendKeys(paneId, ["Enter"]);
 			}),
 		);
 		status = yield* waitForWorking(workingWaitMs);
@@ -383,9 +412,9 @@ function ensurePromptSubmitted(
 		attempts += 1;
 		const resubmitted = yield* Effect.option(
 			Effect.gen(function* () {
-				paneSendKeysSync(paneId, ["Escape"]);
+				yield* sendKeys(paneId, ["Escape"]);
 				yield* Effect.sleep(100);
-				paneRunSync(paneId, prompt);
+				yield* paneRun(paneId, prompt);
 			}),
 		);
 		if (Option.isNone(resubmitted)) {
@@ -448,13 +477,15 @@ function acquireRolePane(
 		if (opts?.interactiveCmd?.length) {
 			// Launch the interactive harness only (no task argv).
 			// Pi roles get PI_CODING_AGENT_DIR without pi-vimmode so pane-run pastes
-			// are not trapped in modal INSERT.
-			const launchCmd = wrapInteractiveCmdNoVim(opts.interactiveCmd);
-			const cmd = shellJoin(["cd", process.cwd(), "&&", "exec", ...launchCmd]);
-			yield* Effect.try({
-				try: () => paneRunSync(paneId, cmd),
+			// are not trapped in modal INSERT. Materializing that dir touches the
+			// filesystem, so keep its failure a typed HerdrError, not a defect.
+			const interactiveCmd = opts.interactiveCmd;
+			const launchCmd = yield* Effect.try({
+				try: () => wrapInteractiveCmdNoVim(interactiveCmd),
 				catch: toHerdrError,
 			});
+			const cmd = shellJoin(["cd", process.cwd(), "&&", "exec", ...launchCmd]);
+			yield* paneRun(paneId, cmd);
 		}
 		return { pane_id: paneId, label, reused: false };
 	});
@@ -504,8 +535,9 @@ function runInteractivePromptImpl(
 		// Reused pi panes (or any pi that still has vimmode) — slash-disable
 		// before the task pointer so herdr paste submits as a normal prompt.
 		if (isPiCmd(interactiveCmd)) {
+			// best-effort; no-vim agent dir is the primary guard
 			yield* Effect.gen(function* () {
-				paneRunSync(acquired.pane_id, "/vimmode off");
+				yield* paneRun(acquired.pane_id, "/vimmode off");
 				yield* waitAgentReady(acquired.pane_id, 5_000);
 				yield* Effect.sleep(300);
 			}).pipe(Effect.ignore);
@@ -513,10 +545,7 @@ function runInteractivePromptImpl(
 
 		// Submit pointer into the live TUI (Herdr: pane run = text + Enter),
 		// then confirm the agent actually started — do not trust fire-and-forget.
-		yield* Effect.try({
-			try: () => paneRunSync(acquired.pane_id, prompt),
-			catch: toHerdrError,
-		});
+		yield* paneRun(acquired.pane_id, prompt);
 		const submit = yield* ensurePromptSubmitted(acquired.pane_id, prompt);
 		return {
 			pane_id: acquired.pane_id,
@@ -546,11 +575,7 @@ export const HerdrLive = Layer.effect(
 
 			paneGet: (paneId) => Effect.sync(() => paneGetSync(paneId)),
 
-			paneRun: (paneId, command) =>
-				Effect.try({
-					try: () => paneRunSync(paneId, command),
-					catch: toHerdrError,
-				}),
+			paneRun,
 
 			paneForegroundNames: (paneId) =>
 				Effect.sync(() => paneForegroundNamesSync(paneId)),

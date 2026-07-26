@@ -112,7 +112,10 @@ export class VerifyFailed extends Schema.TaggedErrorClass<VerifyFailed>()(
 	"VerifyFailed",
 	{
 		commands: Schema.Array(Schema.String),
+		/** Tail of the verify log — truncated; `verify_log` has the full text. */
 		outputs: Schema.Array(Schema.String),
+		/** Repo-relative path of the full verify log. */
+		verify_log: Schema.String,
 	},
 ) {}
 
@@ -130,7 +133,7 @@ export type AppError =
 	| ArtifactInvalid
 	| VerifyFailed;
 
-const APP_ERROR_TAGS = new Set<string>([
+const APP_ERROR_TAG_LIST = [
 	"NoRunState",
 	"IllegalTool",
 	"IllegalKind",
@@ -143,7 +146,20 @@ const APP_ERROR_TAGS = new Set<string>([
 	"WaitAborted",
 	"ArtifactInvalid",
 	"VerifyFailed",
-]);
+] as const satisfies readonly AppError["_tag"][];
+
+/**
+ * Compile-time guard: an `AppError` member missing from `APP_ERROR_TAG_LIST`
+ * would make `isAppError` return false for it, silently degrading a designed
+ * refusal into `bug: …`. Unlike the `toToolResult` switch, a `Set<string>`
+ * cannot be checked by exhaustiveness alone — so assert it here.
+ */
+type AssertNever<T extends never> = T;
+type _AllAppErrorTagsCovered = AssertNever<
+	Exclude<AppError["_tag"], (typeof APP_ERROR_TAG_LIST)[number]>
+>;
+
+const APP_ERROR_TAGS: ReadonlySet<string> = new Set(APP_ERROR_TAG_LIST);
 
 export function isAppError(u: unknown): u is AppError {
 	return (
@@ -229,7 +245,11 @@ export function toToolResult(e: AppError): ToolErr {
 			return err(e.message, { data: { artifact: e.artifact } });
 		case "VerifyFailed":
 			return err("verify commands failed — commit refused", {
-				data: { commands: e.commands, outputs: e.outputs },
+				data: {
+					commands: e.commands,
+					outputs: e.outputs,
+					verify_log: e.verify_log,
+				},
 			});
 	}
 }

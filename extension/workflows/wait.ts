@@ -145,8 +145,17 @@ export const waitWorkflow = (
 				// Post-completion Schema guard only — isCompleteArtifact above is the
 				// completeness test. A bad/absent verdict must keep waiting, not fail
 				// here (that already happened before advanceOnComplete was called).
+				//
+				// Only review kinds carry a meaningful verdict. A stray `verdict:` on
+				// a plan/code/package artifact is noise the old parser ignored;
+				// validating it here would wedge the run permanently (state is not
+				// saved on failure, so every retry fails identically).
 				const decoded = decodeFrontMatterResult(
-					{ status: fm.status, verdict: fm.verdict, nits: fm.nits },
+					{
+						status: fm.status,
+						...(requireVerdict ? { verdict: fm.verdict } : {}),
+						nits: fm.nits,
+					},
 					pendingArtifact,
 				);
 				if (Result.isFailure(decoded)) {

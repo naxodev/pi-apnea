@@ -133,6 +133,61 @@ describe("applyProjectConfig", () => {
 		expect(merged.review_round_cap).toBe(5);
 		expect(merged.pane_style).toBe("floating");
 	});
+
+	// Out-of-range overlay values fall back rather than propagate: a project
+	// config is a shared, checked-in file, and cap=0 would deadlock every review.
+	test("out-of-range overlay values fall back to base", () => {
+		const merged = applyProjectConfig(base, {
+			review_round_cap: 0,
+			timeouts_ms: { verify: 500 },
+		});
+		expect(merged.review_round_cap).toBe(3);
+		expect(merged.timeouts_ms.verify).toBe(900_000);
+	});
+});
+
+/**
+ * A hand-edited config with an out-of-range number must degrade to the default,
+ * not fail the decode: `config.load` runs inside every tool, so a hard failure
+ * here refuses workflow_start / dispatch_role / wait / commit alike, leaving no
+ * way to recover from inside Pi.
+ */
+describe("out-of-range numbers degrade instead of failing the decode", () => {
+	test("global timeouts_ms below the 1000ms floor fall back to defaults", () => {
+		const r = decodeGlobalConfig({
+			...baseRawGlobal,
+			timeouts_ms: { verify: 500, coding: 1_800_000 },
+		});
+		expect(Result.isSuccess(r)).toBe(true);
+		if (Result.isSuccess(r)) {
+			expect(r.success.timeouts_ms.verify).toBe(900_000); // DEFAULT_TIMEOUTS
+			expect(r.success.timeouts_ms.coding).toBe(1_800_000); // in range, kept
+		}
+	});
+
+	test("global review_round_cap below 1 falls back to 3", () => {
+		const r = decodeGlobalConfig({ ...baseRawGlobal, review_round_cap: 0 });
+		expect(Result.isSuccess(r)).toBe(true);
+		if (Result.isSuccess(r)) expect(r.success.review_round_cap).toBe(3);
+	});
+
+	test("project overlay with an out-of-range number still decodes", () => {
+		const r = decodeProjectConfig({
+			review_round_cap: 0,
+			timeouts_ms: { verify: 500 },
+		});
+		expect(Result.isSuccess(r)).toBe(true);
+	});
+
+	// Wrong *type* is still a hard failure — that is a malformed file, not a
+	// value the defaults can stand in for.
+	test("non-numeric timeout is still rejected", () => {
+		const r = decodeGlobalConfig({
+			...baseRawGlobal,
+			timeouts_ms: { verify: "900000" },
+		});
+		expect(Result.isFailure(r)).toBe(true);
+	});
 });
 
 describe("validateRoleBindings", () => {

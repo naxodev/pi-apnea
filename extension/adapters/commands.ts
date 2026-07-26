@@ -5,6 +5,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { formatResult } from "../result.ts";
 import { apneaSetup } from "./setup.ts";
+import { DISPATCH_KINDS } from "../domain/state-machine.ts";
 import type { DispatchKind } from "../domain/state-machine.ts";
 import type { ToolResult } from "../result.ts";
 import { workflowStart } from "./start.ts";
@@ -25,15 +26,6 @@ const SUBS = [
 	"reset-rounds",
 	"help",
 ] as const;
-
-const DISPATCH_KINDS: DispatchKind[] = [
-	"plan",
-	"plan_review",
-	"phase_package",
-	"code",
-	"code_review",
-	"pr_description",
-];
 
 function notify(
 	ctx: {
@@ -69,14 +61,30 @@ function orchestratorKickMessage(
 	].join("\n");
 }
 
-function parseFlags(tokens: string[]): { flags: Set<string>; rest: string[] } {
+/**
+ * Split `--bare` switches from `--key=value` options; everything else is
+ * positional. `values` matters: `rest` never sees a `--`-prefixed token, so
+ * `--key=value` options are only reachable through the map.
+ */
+export function parseFlags(tokens: string[]): {
+	flags: Set<string>;
+	values: Map<string, string>;
+	rest: string[];
+} {
 	const flags = new Set<string>();
+	const values = new Map<string, string>();
 	const rest: string[] = [];
 	for (const t of tokens) {
-		if (t.startsWith("--")) flags.add(t.slice(2));
-		else rest.push(t);
+		if (!t.startsWith("--")) {
+			rest.push(t);
+			continue;
+		}
+		const body = t.slice(2);
+		const eq = body.indexOf("=");
+		if (eq > 0) values.set(body.slice(0, eq), body.slice(eq + 1));
+		else flags.add(body);
 	}
-	return { flags, rest };
+	return { flags, values, rest };
 }
 
 function helpText(): string {
@@ -84,9 +92,10 @@ function helpText(): string {
 		"Apnea commands (tools remain for the model; you use /apnea):",
 		"  /apnea setup [--project] [--force]   # global profiles; optional project bindings",
 		"  /apnea start <goal> [--allow-dirty] [--slug=name]",
-		"  /apnea resume | abandon | status | wait",
+		"  /apnea resume | abandon | status",
+		"  /apnea wait [--timeout=<ms>]",
 		"  /apnea dispatch <kind> [--rework]",
-		"      kinds: plan | plan_review | phase_package | code | code_review | pr_description",
+		`      kinds: ${DISPATCH_KINDS.join(" | ")}`,
 		"  /apnea commit [--done] [message]",
 		"  /apnea reset-rounds <gate>   (human only; e.g. plan_review or phase-01/code_review)",
 		"  /apnea help",
@@ -177,7 +186,7 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 
 			const tokens = raw.split(/\s+/).filter(Boolean);
 			const sub = tokens[0]!;
-			const { flags, rest } = parseFlags(tokens.slice(1));
+			const { flags, values, rest } = parseFlags(tokens.slice(1));
 
 			try {
 				switch (sub) {
@@ -197,15 +206,8 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 
 					case "start": {
 						// goal is everything not a flag; support --slug=x
-						let slug: string | undefined;
-						const goalParts: string[] = [];
-						for (const t of tokens.slice(1)) {
-							if (t.startsWith("--slug=")) slug = t.slice("--slug=".length);
-							else if (t === "--allow-dirty") continue;
-							else if (t.startsWith("--")) continue;
-							else goalParts.push(t);
-						}
-						const goal = goalParts.join(" ").trim();
+						const slug = values.get("slug");
+						const goal = rest.join(" ").trim();
 						if (!goal) {
 							ctx.ui.notify(
 								"Usage: /apnea start <goal> [--allow-dirty] [--slug=name]",
@@ -244,11 +246,16 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 						return;
 
 					case "wait": {
-						const timeoutTok = rest.find((t) => t.startsWith("--timeout="));
-						const timeout_ms = timeoutTok
-							? Number(timeoutTok.slice("--timeout=".length))
-							: undefined;
-						const r = await workflowWait({ timeout_ms });
+						const timeoutTok = values.get("timeout");
+						const parsed = timeoutTok ? Number(timeoutTok) : undefined;
+						if (parsed !== undefined && !Number.isFinite(parsed)) {
+							ctx.ui.notify(
+								`Usage: /apnea wait [--timeout=<ms>] (got --timeout=${timeoutTok})`,
+								"error",
+							);
+							return;
+						}
+						const r = await workflowWait({ timeout_ms: parsed });
 						notify(ctx, r);
 						return;
 					}

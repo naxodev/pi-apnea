@@ -12,6 +12,7 @@ import { Effect, Result } from "effect";
 import {
 	Herdr,
 	HerdrLive,
+	ensurePromptSubmitted,
 	floatingPanePath,
 	resolveExecutable,
 } from "./herdr.ts";
@@ -124,6 +125,57 @@ describe("resolveExecutable", () => {
 		fs.chmodSync(bin, 0o755);
 		expect(resolveExecutable("mytool", d)).toBe(bin);
 		expect(resolveExecutable("mytool", "/no/such/bin")).toBeNull();
+	});
+});
+
+describe("ensurePromptSubmitted recovery", () => {
+	/**
+	 * Fake `herdr` where the pane is permanently idle and `send-keys` fails —
+	 * i.e. the pane died (or the installed herdr predates the subcommand)
+	 * between prompt submit and the recovery attempt.
+	 */
+	function fakeHerdrBin(dir: string): void {
+		const bin = path.join(dir, "herdr");
+		fs.writeFileSync(
+			bin,
+			[
+				"#!/bin/sh",
+				'case "$1 $2" in',
+				'  "pane get") echo \'{"result":{"pane":{"pane_id":"p1","agent_status":"idle"}}}\' ;;',
+				'  "pane send-keys") echo "pane is gone" >&2; exit 1 ;;',
+				'  *) echo \'{"result":{}}\' ;;',
+				"esac",
+			].join("\n"),
+		);
+		fs.chmodSync(bin, 0o755);
+	}
+
+	// The `*Sync` helpers throw, and a throw inside Effect.gen is a *defect* —
+	// Effect.ignore/Effect.option pass defects straight through. If recovery
+	// dies here, dispatch_role aborts before `store.save`, so the role agent
+	// runs with the prompt while the run has no pending_artifact: workflow_wait
+	// then refuses and a re-dispatch renames the produced artifact to .bak.
+	test("a dead pane during recovery reports accepted:false instead of dying", async () => {
+		const d = tmp();
+		fakeHerdrBin(d);
+		const prevPath = process.env.PATH;
+		const prevEnv = process.env.HERDR_ENV;
+		process.env.PATH = d;
+		process.env.HERDR_ENV = "1";
+		try {
+			const out = await Effect.runPromise(
+				ensurePromptSubmitted("p1", "do the thing", {
+					settleMs: 1,
+					workingWaitMs: 1,
+				}),
+			);
+			expect(out.accepted).toBe(false);
+			expect(out.attempts).toBe(3);
+		} finally {
+			process.env.PATH = prevPath;
+			if (prevEnv === undefined) delete process.env.HERDR_ENV;
+			else process.env.HERDR_ENV = prevEnv;
+		}
 	});
 });
 

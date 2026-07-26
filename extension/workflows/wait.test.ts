@@ -135,6 +135,32 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 	);
 
 	itEffect(
+		"a stray non-review verdict on a code artifact still advances — validating it would wedge the run forever (state is not saved on failure, so every retry repeats)",
+		() => {
+			const state = baseState({
+				step: "coding",
+				pending_artifact: ".apnea/artifacts/phase-01/round-1/coder-result.md",
+				pending_role: "coder",
+			});
+			const fsFake = seedFs(state, {
+				[`${ROOT}/.apnea/artifacts/phase-01/round-1/coder-result.md`]:
+					"---\nstatus: done\nverdict: PASS\n---\nbody",
+			});
+			const { layer, fakeFs } = layerOf(fsFake);
+			return Effect.gen(function* () {
+				const result = yield* waitWorkflow({}, ROOT);
+				expect(result.ok).toBe(true);
+				if (result.ok) {
+					expect(result.data?.step).toBe("code_review");
+					// asVerdict() still refuses to promote a bogus verdict to a real one
+					expect(result.data?.verdict).toBeNull();
+				}
+				expect(savedState(fakeFs).step).toBe("code_review");
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	itEffect(
 		"aborts via AbortSignal while parked in Effect.sleep, without ever advancing the clock — this is the interruption proof",
 		() => {
 			const state = baseState({

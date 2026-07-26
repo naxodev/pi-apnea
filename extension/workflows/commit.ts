@@ -111,6 +111,8 @@ export const commitWorkflow = (
 			return yield* new VerifyFailed({
 				commands: cmds,
 				outputs: [verify.log.slice(-2000)],
+				// `outputs` is a tail — point the caller at the full log on disk.
+				verify_log: rel(vlog, root),
 			});
 		}
 
