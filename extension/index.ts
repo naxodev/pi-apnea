@@ -3,23 +3,20 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { registerApneaCommands } from "./commands.ts";
-import { toolContent } from "./lib/result.ts";
-import type { ToolResult } from "./lib/types.ts";
-import { workflowCommitPhase } from "./tools/commit.ts";
-import { workflowDispatch } from "./tools/dispatch.ts";
-import { workflowStart } from "./tools/start.ts";
-import { workflowResetRounds, workflowStatus } from "./tools/status.ts";
-import { workflowWait } from "./tools/wait.ts";
+import { registerApneaCommands } from "./adapters/commands.ts";
+import { DISPATCH_KINDS } from "./domain/state-machine.ts";
+import type { DispatchKind as DispatchKindName } from "./domain/state-machine.ts";
+import { toolContent } from "./result.ts";
+import type { ToolResult } from "./result.ts";
+import { workflowStart } from "./adapters/start.ts";
+import { workflowResetRounds, workflowStatus } from "./adapters/status.ts";
+import { workflowCommitPhase } from "./adapters/commit.ts";
+import { workflowDispatch } from "./adapters/dispatch.ts";
+import { workflowWait } from "./adapters/wait.ts";
 
-const DispatchKind = Type.Union([
-	Type.Literal("plan"),
-	Type.Literal("plan_review"),
-	Type.Literal("phase_package"),
-	Type.Literal("code"),
-	Type.Literal("code_review"),
-	Type.Literal("pr_description"),
-]);
+const DispatchKind = Type.Union(
+	DISPATCH_KINDS.map((kind) => Type.Literal(kind)),
+);
 
 export default function (pi: ExtensionAPI) {
 	// `/apnea …` for humans (autocomplete); tools remain for the model
@@ -63,7 +60,7 @@ export default function (pi: ExtensionAPI) {
 				});
 			}
 			return toolContent(
-				workflowStart({
+				await workflowStart({
 					goal: params.goal ?? "",
 					slug: params.slug,
 					allow_dirty: params.allow_dirty,
@@ -92,19 +89,13 @@ export default function (pi: ExtensionAPI) {
 		async execute(
 			_id: string,
 			params: {
-				kind:
-					| "plan"
-					| "plan_review"
-					| "phase_package"
-					| "code"
-					| "code_review"
-					| "pr_description";
+				kind: DispatchKindName;
 				task_markdown?: string;
 				rework?: boolean;
 			},
 		) {
 			return toolContent(
-				workflowDispatch({
+				await workflowDispatch({
 					kind: params.kind,
 					task_markdown: params.task_markdown,
 					rework: params.rework,
@@ -176,7 +167,7 @@ export default function (pi: ExtensionAPI) {
 			params: { message?: string; no_remaining_phases?: boolean },
 		) {
 			return toolContent(
-				workflowCommitPhase({
+				await workflowCommitPhase({
 					message: params.message,
 					no_remaining_phases: params.no_remaining_phases,
 				}),
@@ -191,7 +182,7 @@ export default function (pi: ExtensionAPI) {
 			"Read-only snapshot of run state and legal tools. Never mutates.",
 		parameters: Type.Object({}),
 		async execute() {
-			return toolContent(workflowStatus());
+			return toolContent(await workflowStatus());
 		},
 	});
 
@@ -206,7 +197,7 @@ export default function (pi: ExtensionAPI) {
 			}),
 		}),
 		async execute(_id: string, params: { gate: string }) {
-			return toolContent(workflowResetRounds({ gate: params.gate }));
+			return toolContent(await workflowResetRounds({ gate: params.gate }));
 		},
 	});
 }

@@ -6,6 +6,8 @@ File-backed handoffs. Real terminals. No hidden subagents.
 
 > **Status:** paper protocol **passed** (`examples/toy/GATE-RESULTS.md`). Extension tools are implemented under `extension/`. Install/link the package, then drive runs with an orchestrator Pi inside Herdr.
 
+The extension internals are written with Effect v4 — services/layers for IO, Schema for state/config, tagged errors instead of throw-based control flow (see [ADR 0008](docs/adr/0008-effect-v4-internals.md)).
+
 ## What it is
 
 A sequential loop:
