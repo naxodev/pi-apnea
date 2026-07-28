@@ -360,6 +360,27 @@ function waitAgentReady(
 }
 
 /**
+ * The three pane operations the recovery ladder drives.
+ *
+ * Injectable because the ladder cannot otherwise be tested: Bun's `spawnSync`
+ * resolves binaries against the process's real PATH and ignores mutations to
+ * `process.env.PATH`, so a fake `herdr` placed on a temp PATH is never invoked.
+ */
+export type PromptProbes = {
+	readonly status: () => string | undefined;
+	readonly sendKeys: (keys: string[]) => Effect.Effect<void, HerdrError>;
+	readonly run: (text: string) => Effect.Effect<void, HerdrError>;
+};
+
+function livePromptProbes(paneId: string): PromptProbes {
+	return {
+		status: () => paneGetSync(paneId).agent_status,
+		sendKeys: (keys) => sendKeys(paneId, keys),
+		run: (text) => paneRun(paneId, text),
+	};
+}
+
+/**
  * After submitting a prompt, confirm the agent actually started working.
  * Claude often parks multi-line paste in the input without submitting;
  * pi+vim can leave the prompt in INSERT mode. Recover with Escape+Enter
@@ -368,9 +389,14 @@ function waitAgentReady(
 export function ensurePromptSubmitted(
 	paneId: string,
 	prompt: string,
-	opts?: { settleMs?: number; workingWaitMs?: number },
+	opts?: {
+		settleMs?: number;
+		workingWaitMs?: number;
+		probes?: PromptProbes;
+	},
 ): Effect.Effect<{ accepted: boolean; attempts: number; last_status?: string }> {
 	return Effect.gen(function* () {
+		const probes = opts?.probes ?? livePromptProbes(paneId);
 		const settleMs = opts?.settleMs ?? 2500;
 		const workingWaitMs = opts?.workingWaitMs ?? 12_000;
 		let attempts = 1;
@@ -379,11 +405,11 @@ export function ensurePromptSubmitted(
 			Effect.gen(function* () {
 				const deadline = (yield* Clock.currentTimeMillis) + ms;
 				while ((yield* Clock.currentTimeMillis) < deadline) {
-					const s = paneGetSync(paneId).agent_status;
+					const s = probes.status();
 					if (s === "working" || s === "blocked") return s;
 					yield* Effect.sleep(400);
 				}
-				return paneGetSync(paneId).agent_status;
+				return probes.status();
 			});
 
 		// Give the first paneRun a moment to flip status.
@@ -401,9 +427,9 @@ export function ensurePromptSubmitted(
 		attempts += 1;
 		yield* Effect.ignore(
 			Effect.gen(function* () {
-				yield* sendKeys(paneId, ["Escape"]);
+				yield* probes.sendKeys(["Escape"]);
 				yield* Effect.sleep(150);
-				yield* sendKeys(paneId, ["Enter"]);
+				yield* probes.sendKeys(["Enter"]);
 			}),
 		);
 		status = yield* waitForWorking(workingWaitMs);
@@ -415,16 +441,16 @@ export function ensurePromptSubmitted(
 		attempts += 1;
 		const resubmitted = yield* Effect.option(
 			Effect.gen(function* () {
-				yield* sendKeys(paneId, ["Escape"]);
+				yield* probes.sendKeys(["Escape"]);
 				yield* Effect.sleep(100);
-				yield* paneRun(paneId, prompt);
+				yield* probes.run(prompt);
 			}),
 		);
 		if (Option.isNone(resubmitted)) {
 			return {
 				accepted: false,
 				attempts,
-				last_status: paneGetSync(paneId).agent_status,
+				last_status: probes.status(),
 			};
 		}
 		yield* Effect.sleep(settleMs);

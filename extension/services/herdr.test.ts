@@ -8,10 +8,13 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Effect, Result } from "effect";
+import { Effect, Fiber, Result } from "effect";
+import { TestClock } from "effect/testing";
+import { HerdrError } from "../errors.ts";
 import {
 	Herdr,
 	HerdrLive,
+	type PromptProbes,
 	ensurePromptSubmitted,
 	floatingPanePath,
 	resolveExecutable,
@@ -130,25 +133,97 @@ describe("resolveExecutable", () => {
 
 describe("ensurePromptSubmitted recovery", () => {
 	/**
-	 * Fake `herdr` where the pane is permanently idle and `send-keys` fails —
-	 * i.e. the pane died (or the installed herdr predates the subcommand)
-	 * between prompt submit and the recovery attempt.
+	 * Fake probes whose reported status flips on *observed events* — a `sendKeys`
+	 * or a `run` — not on a poll count or a timer. Each ladder rung is defined by
+	 * "working only after X", so that is what the fake keys on.
 	 */
-	function fakeHerdrBin(dir: string): void {
-		const bin = path.join(dir, "herdr");
-		fs.writeFileSync(
-			bin,
-			[
-				"#!/bin/sh",
-				'case "$1 $2" in',
-				'  "pane get") echo \'{"result":{"pane":{"pane_id":"p1","agent_status":"idle"}}}\' ;;',
-				'  "pane send-keys") echo "pane is gone" >&2; exit 1 ;;',
-				'  *) echo \'{"result":{}}\' ;;',
-				"esac",
-			].join("\n"),
-		);
-		fs.chmodSync(bin, 0o755);
+	function fakeProbes(opts: {
+		workingAfter: "start" | "sendKeys" | "rerun" | "never";
+		sendKeysFails?: boolean;
+	}) {
+		const rec = { keys: [] as string[][], runs: [] as string[] };
+		let sawSendKeys = false;
+		let runCount = 0;
+		const probes: PromptProbes = {
+			status: () => {
+				switch (opts.workingAfter) {
+					case "start":
+						return "working";
+					case "sendKeys":
+						return sawSendKeys ? "working" : "idle";
+					case "rerun":
+						return runCount > 0 ? "working" : "idle";
+					case "never":
+						return "idle";
+				}
+			},
+			sendKeys: (keys) =>
+				opts.sendKeysFails
+					? Effect.fail(new HerdrError({ message: "pane is gone" }))
+					: Effect.sync(() => {
+							rec.keys.push(keys);
+							sawSendKeys = true;
+						}),
+			run: (text) =>
+				Effect.sync(() => {
+					rec.runs.push(text);
+					runCount += 1;
+				}),
+		};
+		return { probes, rec };
 	}
+
+	/**
+	 * Run the ladder in virtual time. Production timings (2.5s settle, 12s
+	 * windows) then cost nothing, so the test exercises the real thresholds.
+	 */
+	function drive(
+		eff: Effect.Effect<{ accepted: boolean; attempts: number; last_status?: string }>,
+	) {
+		return Effect.gen(function* () {
+			const fiber = yield* Effect.forkChild(eff);
+			yield* TestClock.adjust(120_000);
+			return yield* Fiber.join(fiber);
+		}).pipe(Effect.provide(TestClock.layer()));
+	}
+
+	test("accepted immediately: status is working from the start", async () => {
+		const { probes } = fakeProbes({ workingAfter: "start" });
+		const out = await Effect.runPromise(
+			drive(ensurePromptSubmitted("p1", "go", { probes })),
+		);
+		expect(out).toEqual({ accepted: true, attempts: 1, last_status: "working" });
+	});
+
+	test("Escape/Enter recovery: idle until sendKeys, no re-submit", async () => {
+		const { probes, rec } = fakeProbes({ workingAfter: "sendKeys" });
+		const out = await Effect.runPromise(
+			drive(ensurePromptSubmitted("p1", "go", { probes })),
+		);
+		expect(out.attempts).toBe(2);
+		expect(out.accepted).toBe(true);
+		expect(rec.keys).toEqual([["Escape"], ["Enter"]]);
+		expect(rec.runs).toEqual([]);
+	});
+
+	test("full re-submit: idle until run, Escape/Enter then Escape+run", async () => {
+		const { probes, rec } = fakeProbes({ workingAfter: "rerun" });
+		const out = await Effect.runPromise(
+			drive(ensurePromptSubmitted("p1", "go", { probes })),
+		);
+		expect(out.attempts).toBe(3);
+		expect(out.accepted).toBe(true);
+		expect(rec.runs).toEqual(["go"]);
+		expect(rec.keys).toEqual([["Escape"], ["Enter"], ["Escape"]]);
+	});
+
+	test("never accepted: pane stays idle through the whole ladder", async () => {
+		const { probes } = fakeProbes({ workingAfter: "never" });
+		const out = await Effect.runPromise(
+			drive(ensurePromptSubmitted("p1", "go", { probes })),
+		);
+		expect(out).toEqual({ accepted: false, attempts: 3, last_status: "idle" });
+	});
 
 	// The `*Sync` helpers throw, and a throw inside Effect.gen is a *defect* —
 	// Effect.ignore/Effect.option pass defects straight through. If recovery
@@ -156,26 +231,33 @@ describe("ensurePromptSubmitted recovery", () => {
 	// runs with the prompt while the run has no pending_artifact: workflow_wait
 	// then refuses and a re-dispatch renames the produced artifact to .bak.
 	test("a dead pane during recovery reports accepted:false instead of dying", async () => {
-		const d = tmp();
-		fakeHerdrBin(d);
-		const prevPath = process.env.PATH;
-		const prevEnv = process.env.HERDR_ENV;
-		process.env.PATH = d;
-		process.env.HERDR_ENV = "1";
-		try {
-			const out = await Effect.runPromise(
-				ensurePromptSubmitted("p1", "do the thing", {
-					settleMs: 1,
-					workingWaitMs: 1,
-				}),
-			);
-			expect(out.accepted).toBe(false);
-			expect(out.attempts).toBe(3);
-		} finally {
-			process.env.PATH = prevPath;
-			if (prevEnv === undefined) delete process.env.HERDR_ENV;
-			else process.env.HERDR_ENV = prevEnv;
-		}
+		const { probes, rec } = fakeProbes({
+			workingAfter: "never",
+			sendKeysFails: true,
+		});
+		const out = await Effect.runPromise(
+			drive(ensurePromptSubmitted("p1", "do the thing", { probes })),
+		);
+		expect(out.accepted).toBe(false);
+		expect(out.attempts).toBe(3);
+		expect(rec.runs).toEqual([]);
+	});
+});
+
+describe("clock purity", () => {
+	// Deadlines paired with Effect.sleep must read the Clock: a wall-clock
+	// deadline never elapses under TestClock, so the loop would hang instead
+	// of failing loudly. waitAgentReady is not otherwise reachable in tests.
+	test("herdr.ts has no Date.now() deadlines", () => {
+		const src = fs.readFileSync(path.join(import.meta.dir, "herdr.ts"), "utf8");
+		const code = src
+			.split("\n")
+			.filter((line) => {
+				const t = line.trim();
+				return !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
+			})
+			.join("\n");
+		expect(code).not.toContain("Date.now(");
 	});
 });
 
