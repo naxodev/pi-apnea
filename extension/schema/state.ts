@@ -47,7 +47,7 @@ export const RunStateSchema = Schema.Struct({
 	// optional on Encoded so legacy fixtures without pane fields still decode
 	pending_pane_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
 	pending_pane_label: Schema.optionalKey(Schema.NullOr(Schema.String)),
-	/** Runtime field; human JSON schema may lag this key. */
+	/** Mirrored in `schemas/state.schema.json`; drift is caught by schema.test.ts. */
 	pending_floating_exit: Schema.optionalKey(Schema.NullOr(Schema.String)),
 	role_panes: Schema.optionalKey(
 		Schema.Record(Schema.String, PaneRefSchema),

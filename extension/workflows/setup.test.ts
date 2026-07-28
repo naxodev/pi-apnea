@@ -2,9 +2,10 @@ import { afterEach, describe, expect } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Effect, Layer, Result } from "effect";
+import { Effect, Layer } from "effect";
 import { globalConfigPath, projectConfigPath } from "../domain/paths.ts";
 import { FileSystemLive } from "../services/file-system.ts";
+import { expectFailure } from "../test/expect-failure.ts";
 import { makeFakeFileSystem } from "../test/fake-file-system.ts";
 import { fakeHerdrLayer, type FakeHerdrOptions } from "../test/fake-herdr.ts";
 import { itEffect } from "../test/it-effect.ts";
@@ -213,12 +214,10 @@ describe("setupWorkflow (fake FileSystem + fake Herdr)", () => {
 			const deps = fakeDeps({ onPath: onPathFrom({}) });
 			return Effect.gen(function* () {
 				const r = yield* Effect.result(setupWorkflow({}, ROOT, deps));
-				expect(Result.isFailure(r)).toBe(true);
-				if (Result.isFailure(r) && r.failure._tag === "ConfigError") {
-					expect(r.failure.message).toBe(
-						"pi not on PATH — install pi before apnea setup",
-					);
-				}
+				const e = expectFailure(r, "ConfigError");
+				expect(e.message).toBe(
+					"pi not on PATH — install pi before apnea setup",
+				);
 				// A refusal that half-writes a config would be worse than the refusal.
 				expect(fsFake.files.size).toBe(0);
 			}).pipe(Effect.provide(layer));

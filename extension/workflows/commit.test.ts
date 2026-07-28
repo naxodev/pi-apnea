@@ -2,8 +2,9 @@ import { describe, expect } from "bun:test";
 import { Effect, Exit, Layer } from "effect";
 import { statePath } from "../domain/paths.ts";
 import type { RunState } from "../domain/types.ts";
-import { makeFakeFileSystem } from "../test/fake-file-system.ts";
+import { expectFailure } from "../test/expect-failure.ts";
 import { fakeConfigLayer } from "../test/fake-config.ts";
+import { makeFakeFileSystem } from "../test/fake-file-system.ts";
 import { fakeVcsLayer } from "../test/fake-vcs.ts";
 import { itEffect } from "../test/it-effect.ts";
 import { RunStore, RunStoreLive } from "../services/run-store.ts";
@@ -83,10 +84,7 @@ describe("commitWorkflow (fake layers)", () => {
 			const exit = yield* Effect.exit(commitWorkflow({}, ROOT));
 			expect(Exit.isFailure(exit)).toBe(true);
 			const r = yield* Effect.result(commitWorkflow({}, ROOT));
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure") {
-				expect(r.failure._tag).toBe("IllegalTool");
-			}
+			expectFailure(r, "IllegalTool");
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -96,11 +94,8 @@ describe("commitWorkflow (fake layers)", () => {
 		const { layer } = layerOf(fs);
 		return Effect.gen(function* () {
 			const r = yield* Effect.result(commitWorkflow({}, ROOT));
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure") {
-				expect(r.failure._tag).toBe("GateRefused");
-				expect(r.failure.message).toContain("current_code_review not set");
-			}
+			const e = expectFailure(r, "GateRefused");
+			expect(e.message).toContain("current_code_review not set");
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -115,14 +110,9 @@ describe("commitWorkflow (fake layers)", () => {
 		const { layer } = layerOf(fs);
 		return Effect.gen(function* () {
 			const r = yield* Effect.result(commitWorkflow({}, ROOT));
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure" && r.failure._tag === "GateRefused") {
-				expect(r.failure.details?.review).toBe(state.current_code_review);
-				expect(r.failure.details?.verdict).toBe("CHANGES_REQUIRED");
-			} else {
-				expect(r._tag).toBe("Failure");
-				if (r._tag === "Failure") expect(r.failure._tag).toBe("GateRefused");
-			}
+			const e = expectFailure(r, "GateRefused");
+			expect(e.details?.review).toBe(state.current_code_review);
+			expect(e.details?.verdict).toBe("CHANGES_REQUIRED");
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -137,11 +127,8 @@ describe("commitWorkflow (fake layers)", () => {
 		const { layer } = layerOf(fs);
 		return Effect.gen(function* () {
 			const r = yield* Effect.result(commitWorkflow({}, ROOT));
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure") {
-				expect(r.failure._tag).toBe("ArtifactInvalid");
-				expect(r.failure.message).toContain("no verify commands");
-			}
+			const e = expectFailure(r, "ArtifactInvalid");
+			expect(e.message).toContain("no verify commands");
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -161,19 +148,14 @@ describe("commitWorkflow (fake layers)", () => {
 			});
 			return Effect.gen(function* () {
 				const r = yield* Effect.result(commitWorkflow({}, ROOT));
-				expect(r._tag).toBe("Failure");
-				if (r._tag === "Failure") {
-					expect(r.failure._tag).toBe("VerifyFailed");
-					if (r.failure._tag === "VerifyFailed") {
-						expect(r.failure.commands.length).toBeGreaterThan(0);
-						expect(r.failure.outputs[0]).toContain("exit=1");
-						// outputs is only the last 2000 chars — a real tsc/test failure
-						// overflows it, so the caller must be told where the full log is.
-						expect(r.failure.verify_log).toBe(
-							".apnea/artifacts/phase-01/round-1/verify.log",
-						);
-					}
-				}
+				const e = expectFailure(r, "VerifyFailed");
+				expect(e.commands.length).toBeGreaterThan(0);
+				expect(e.outputs[0]).toContain("exit=1");
+				// outputs is only the last 2000 chars — a real tsc/test failure
+				// overflows it, so the caller must be told where the full log is.
+				expect(e.verify_log).toBe(
+					".apnea/artifacts/phase-01/round-1/verify.log",
+				);
 				// verify.log next to review
 				const vlog = `${ROOT}/.apnea/artifacts/phase-01/round-1/verify.log`;
 				expect(fakeFs.files.has(vlog)).toBe(true);

@@ -21,7 +21,7 @@ const RoleBindingSchema = Schema.Struct({
 	profile: Schema.String.check(Schema.isMinLength(1)),
 });
 
-const PaneStyleSchema = Schema.Literals(["regular", "floating"] as const);
+export const PaneStyleSchema = Schema.Literals(["regular", "floating"] as const);
 
 /**
  * Mirrors `schemas/config.schema.json` top-level keys.

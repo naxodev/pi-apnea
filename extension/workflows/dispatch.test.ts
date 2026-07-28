@@ -2,6 +2,7 @@ import { Effect, Layer } from "effect";
 import { describe, expect } from "bun:test";
 import { statePath } from "../domain/paths.ts";
 import type { ApneaConfig, RunState } from "../domain/types.ts";
+import { expectFailure } from "../test/expect-failure.ts";
 import { fakeConfigLayer } from "../test/fake-config.ts";
 import { makeFakeFileSystem } from "../test/fake-file-system.ts";
 import { fakeHerdrLayer } from "../test/fake-herdr.ts";
@@ -87,10 +88,7 @@ describe("dispatchWorkflow (fake layers)", () => {
 		const { layer } = layerOf(fsFake);
 		return Effect.gen(function* () {
 			const r = yield* Effect.result(dispatchWorkflow({ kind: "plan" }, ROOT));
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure") {
-				expect(r.failure._tag).toBe("IllegalTool");
-			}
+			expectFailure(r, "IllegalTool");
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -99,10 +97,8 @@ describe("dispatchWorkflow (fake layers)", () => {
 		const { layer } = layerOf(fsFake);
 		return Effect.gen(function* () {
 			const r = yield* Effect.result(dispatchWorkflow({ kind: "code" }, ROOT));
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure" && r.failure._tag === "IllegalKind") {
-				expect(r.failure.allowed).toEqual(["plan"]);
-			}
+			const e = expectFailure(r, "IllegalKind");
+			expect(e.allowed).toEqual(["plan"]);
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -173,10 +169,8 @@ describe("dispatchWorkflow (fake layers)", () => {
 		const { layer } = layerOf(fsFake, { herdr: { enabled: false } });
 		return Effect.gen(function* () {
 			const r = yield* Effect.result(dispatchWorkflow({ kind: "code" }, ROOT));
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure" && r.failure._tag === "GateRefused") {
-				expect(r.failure.gate).toBe("round_cap");
-			}
+			const e = expectFailure(r, "GateRefused");
+			expect(e.gate).toBe("round_cap");
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -268,12 +262,10 @@ describe("dispatchWorkflow (fake layers)", () => {
 				const r = yield* Effect.result(
 					dispatchWorkflow({ kind: "plan" }, ROOT),
 				);
-				expect(r._tag).toBe("Failure");
-				if (r._tag === "Failure" && r.failure._tag === "HerdrError") {
-					expect(r.failure.message).toBe(
-						"floating panes need herdr >= 0.7.4 — run `herdr update`, or set pane_style=regular",
-					);
-				}
+				const e = expectFailure(r, "HerdrError");
+				expect(e.message).toBe(
+					"floating panes need herdr >= 0.7.4 — run `herdr update`, or set pane_style=regular",
+				);
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -286,10 +278,8 @@ describe("dispatchWorkflow (fake layers)", () => {
 		});
 		return Effect.gen(function* () {
 			const r = yield* Effect.result(dispatchWorkflow({ kind: "plan" }, ROOT));
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure" && r.failure._tag === "HerdrError") {
-				expect(r.failure.message).toContain("apnea herdr plugin not linked");
-			}
+			const e = expectFailure(r, "HerdrError");
+			expect(e.message).toContain("apnea herdr plugin not linked");
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -310,10 +300,8 @@ describe("dispatchWorkflow (fake layers)", () => {
 				const r = yield* Effect.result(
 					dispatchWorkflow({ kind: "plan" }, ROOT),
 				);
-				expect(r._tag).toBe("Failure");
-				if (r._tag === "Failure" && r.failure._tag === "GateRefused") {
-					expect(r.failure.gate).toBe("floating_in_flight");
-				}
+				const e = expectFailure(r, "GateRefused");
+				expect(e.gate).toBe("floating_in_flight");
 			}).pipe(Effect.provide(layer));
 		},
 	);

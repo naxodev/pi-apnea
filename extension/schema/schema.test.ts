@@ -92,9 +92,7 @@ describe("RunStateSchema", () => {
 		};
 		const jsonKeys = Object.keys(doc.properties).sort();
 		const schemaKeys = Object.keys(RunStateSchema.fields).sort();
-		// Runtime gained pending_floating_exit after the human JSON schema freeze.
-		const expected = [...jsonKeys, "pending_floating_exit"].sort();
-		expect(schemaKeys).toEqual(expected);
+		expect(schemaKeys).toEqual(jsonKeys);
 	});
 });
 

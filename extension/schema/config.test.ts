@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Result } from "effect";
 import type { ApneaConfig } from "../domain/types.ts";
+import { expectFailure } from "../test/expect-failure.ts";
 import {
 	applyProjectConfig,
 	decodeGlobalConfig,
 	decodeProjectConfig,
+	PaneStyleSchema,
 	validateRoleBindings,
 } from "./config.ts";
 
@@ -74,22 +76,30 @@ describe("pane_style", () => {
 	});
 
 	// Orchestrator runs unattended — a typo must fail at config load, not mid-run.
-	// Message text is Schema-generated now (not stable API); assert the failure
-	// and the key name only.
+	// Message text is Schema-generated, so assert *containment* of the key name
+	// and of each allowed value derived from `PaneStyleSchema.literals`, rather
+	// than matching the message shape.
 	test("invalid value fails decode naming pane_style", () => {
 		const g = decodeGlobalConfig({ ...baseRawGlobal, pane_style: "tiled" });
-		expect(Result.isFailure(g)).toBe(true);
-		if (Result.isFailure(g)) expect(g.failure.message).toContain("pane_style");
+		const ge = expectFailure(g, "ConfigError");
+		expect(ge.message).toContain("pane_style");
+		for (const allowed of PaneStyleSchema.literals) {
+			expect(ge.message).toContain(allowed);
+		}
 
 		const gBool = decodeGlobalConfig({ ...baseRawGlobal, pane_style: true });
-		expect(Result.isFailure(gBool)).toBe(true);
-		if (Result.isFailure(gBool)) {
-			expect(gBool.failure.message).toContain("pane_style");
+		const gBoolE = expectFailure(gBool, "ConfigError");
+		expect(gBoolE.message).toContain("pane_style");
+		for (const allowed of PaneStyleSchema.literals) {
+			expect(gBoolE.message).toContain(allowed);
 		}
 
 		const p = decodeProjectConfig({ pane_style: "tiled" });
-		expect(Result.isFailure(p)).toBe(true);
-		if (Result.isFailure(p)) expect(p.failure.message).toContain("pane_style");
+		const pe = expectFailure(p, "ConfigError");
+		expect(pe.message).toContain("pane_style");
+		for (const allowed of PaneStyleSchema.literals) {
+			expect(pe.message).toContain(allowed);
+		}
 	});
 
 	// pane_style is a UX preference, not a forbidden project key.
