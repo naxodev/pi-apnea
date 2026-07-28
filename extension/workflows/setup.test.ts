@@ -3,7 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Effect, Layer } from "effect";
-import { globalConfigPath, projectConfigPath } from "../domain/paths.ts";
+import { globalConfigPath, packageRoot, projectConfigPath } from "../domain/paths.ts";
+import { toToolResult } from "../errors.ts";
 import { FileSystemLive } from "../services/file-system.ts";
 import { expectFailure } from "../test/expect-failure.ts";
 import { makeFakeFileSystem } from "../test/fake-file-system.ts";
@@ -205,6 +206,18 @@ function workflowLayer(
 	return { layer: Layer.merge(fakeFs.layer, herdr.layer), herdr: herdr.recorder };
 }
 
+const PLUGIN_SRC = path.join(packageRoot(), "herdr-plugin");
+const PLUGIN_DEST = path.join(path.dirname(globalConfigPath()), "herdr-plugin");
+
+/** Seed the package's plugin dir into the fake FS so provisioning can copy it. */
+function seedPluginSrc(): Record<string, string> {
+	return {
+		[path.join(PLUGIN_SRC, "herdr-plugin.toml")]: 'id = "apnea"\n',
+		[path.join(PLUGIN_SRC, "scripts", "run-task.sh")]:
+			"#!/usr/bin/env bash\nexit 0\n",
+	};
+}
+
 describe("setupWorkflow (fake FileSystem + fake Herdr)", () => {
 	itEffect(
 		"pi missing → ConfigError with the frozen message; writes nothing",
@@ -220,6 +233,9 @@ describe("setupWorkflow (fake FileSystem + fake Herdr)", () => {
 				);
 				// A refusal that half-writes a config would be worse than the refusal.
 				expect(fsFake.files.size).toBe(0);
+				// Neither path nor details set here — toToolResult must still yield
+				// data: undefined rather than an empty object.
+				expect(toToolResult(e).data).toBeUndefined();
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -402,6 +418,156 @@ describe("setupWorkflow (fake FileSystem + fake Herdr)", () => {
 				expect(herdr.linkedPlugins).toEqual([]);
 				expect(herdr.scripts).toEqual([]);
 				expect(herdr.openedPanes).toEqual([]);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	itEffect(
+		"herdr present, modern, plugin not yet linked: herdr_version/herdr_plugin payload keys, copy + link performed",
+		() => {
+			const fsFake = makeFakeFileSystem(seedPluginSrc());
+			const { layer, herdr } = workflowLayer(fsFake, {
+				version: [0, 7, 4],
+				hasPlugin: false,
+			});
+			const deps = fakeDeps({ onPath: onPathFrom({ pi: true, herdr: true }) });
+			return Effect.gen(function* () {
+				const result = yield* setupWorkflow({}, ROOT, deps);
+				expect(result.ok).toBe(true);
+				if (result.ok) {
+					expect(result.data?.herdr_version).toBe("0.7.4");
+					expect(result.data?.herdr_plugin).toEqual({
+						copied: PLUGIN_DEST,
+						linked: true,
+						already_linked: false,
+					});
+					expect(Object.keys(result.data ?? {}).sort()).toEqual(
+						[
+							"global",
+							"project",
+							"detected",
+							"roles",
+							"notes",
+							"pi_role_agent_dir",
+							"next",
+							"herdr_version",
+							"herdr_plugin",
+						].sort(),
+					);
+					const notes = (result.data?.notes ?? []) as string[];
+					expect(
+						notes.some(
+							(n) =>
+								n.includes("herdr-plugin missing") ||
+								n.includes("< 0.7.4") ||
+								n.includes("link failed"),
+						),
+					).toBe(false);
+				}
+				expect(herdr.linkedPlugins).toEqual([PLUGIN_DEST]);
+				expect(fsFake.files.has(path.join(PLUGIN_DEST, "herdr-plugin.toml"))).toBe(
+					true,
+				);
+				expect(
+					fsFake.modes.get(path.join(PLUGIN_DEST, "scripts", "run-task.sh")),
+				).toBe(0o755);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	itEffect(
+		"herdr present, too old: herdr_plugin copied but not linked, note names 0.7.4/herdr update/0.7.3",
+		() => {
+			const fsFake = makeFakeFileSystem(seedPluginSrc());
+			const { layer, herdr } = workflowLayer(fsFake, {
+				version: [0, 7, 3],
+				hasPlugin: false,
+			});
+			const deps = fakeDeps({ onPath: onPathFrom({ pi: true, herdr: true }) });
+			return Effect.gen(function* () {
+				const result = yield* setupWorkflow({}, ROOT, deps);
+				expect(result.ok).toBe(true);
+				if (result.ok) {
+					expect(result.data?.herdr_version).toBe("0.7.3");
+					expect(result.data?.herdr_plugin).toMatchObject({
+						copied: PLUGIN_DEST,
+						linked: false,
+						already_linked: false,
+					});
+					const notes = (result.data?.notes ?? []) as string[];
+					const pluginNote = notes.find((n) => n.includes("0.7.4"));
+					expect(pluginNote).toBeDefined();
+					expect(pluginNote).toContain("herdr update");
+					expect(pluginNote).toContain("0.7.3");
+				}
+				expect(herdr.linkedPlugins).toEqual([]);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	itEffect(
+		"herdr present, plugin already linked: already_linked true, no re-link",
+		() => {
+			const fsFake = makeFakeFileSystem(seedPluginSrc());
+			const { layer, herdr } = workflowLayer(fsFake, {
+				version: [0, 7, 4],
+				hasPlugin: true,
+			});
+			const deps = fakeDeps({ onPath: onPathFrom({ pi: true, herdr: true }) });
+			return Effect.gen(function* () {
+				const result = yield* setupWorkflow({}, ROOT, deps);
+				expect(result.ok).toBe(true);
+				if (result.ok) {
+					expect(result.data?.herdr_plugin).toMatchObject({
+						already_linked: true,
+						linked: false,
+					});
+				}
+				expect(herdr.linkedPlugins).toEqual([]);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	itEffect(
+		"herdr present, version unknown: herdr_version null, treated as sub-0.7.4",
+		() => {
+			const fsFake = makeFakeFileSystem(seedPluginSrc());
+			const { layer, herdr } = workflowLayer(fsFake, {
+				version: null,
+				hasPlugin: false,
+			});
+			const deps = fakeDeps({ onPath: onPathFrom({ pi: true, herdr: true }) });
+			return Effect.gen(function* () {
+				const result = yield* setupWorkflow({}, ROOT, deps);
+				expect(result.ok).toBe(true);
+				if (result.ok) {
+					expect(result.data?.herdr_version).toBeNull();
+					expect(result.data?.herdr_plugin).toMatchObject({ linked: false });
+					const notes = (result.data?.notes ?? []) as string[];
+					expect(notes.some((n) => n.includes("unknown"))).toBe(true);
+				}
+				expect(herdr.linkedPlugins).toEqual([]);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	itEffect(
+		"herdr present, plugin source missing from the package: copied null, reinstall note",
+		() => {
+			const fsFake = makeFakeFileSystem();
+			const { layer } = workflowLayer(fsFake, {
+				version: [0, 7, 4],
+				hasPlugin: false,
+			});
+			const deps = fakeDeps({ onPath: onPathFrom({ pi: true, herdr: true }) });
+			return Effect.gen(function* () {
+				const result = yield* setupWorkflow({}, ROOT, deps);
+				expect(result.ok).toBe(true);
+				if (result.ok) {
+					expect(result.data?.herdr_plugin).toMatchObject({ copied: null });
+					const notes = (result.data?.notes ?? []) as string[];
+					expect(notes.some((n) => n.includes("reinstall"))).toBe(true);
+				}
 			}).pipe(Effect.provide(layer));
 		},
 	);

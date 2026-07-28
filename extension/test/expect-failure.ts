@@ -9,6 +9,10 @@ import { Result } from "effect";
  * `if (r._tag === "Failure" && r.failure._tag === "X")` idiom silently skipped
  * its body when the code produced the *wrong* failure, so those tests could
  * not fail.
+ *
+ * The two `throw`s below each `expect` are TypeScript narrowing aids only —
+ * in practice they are unreachable, because bun's `expect(...).toBe(...)`
+ * throws first on a mismatch.
  */
 export function expectFailure<A, E extends { _tag: string }, T extends E["_tag"]>(
 	r: Result.Result<A, E>,

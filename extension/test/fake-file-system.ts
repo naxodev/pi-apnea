@@ -9,7 +9,7 @@ export function makeFakeFileSystem(
 	modes: Map<string, number>;
 	layer: Layer.Layer<FileSystem>;
 } {
-	const files = new Map<string, string>(Object.entries(initial));
+	const files = new Map<string, string>();
 	// Track directories created via mkdir (and implied by file writes).
 	const dirs = new Set<string>();
 	const modes = new Map<string, number>();
@@ -18,6 +18,11 @@ export function makeFakeFileSystem(
 		const i = p.lastIndexOf("/");
 		if (i > 0) dirs.add(p.slice(0, i));
 	};
+
+	for (const [p, content] of Object.entries(initial)) {
+		ensureParent(p);
+		files.set(p, content);
+	}
 
 	const service: FileSystemService = {
 		readFile: (path) =>

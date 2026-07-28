@@ -17,7 +17,13 @@ import {
 	toolAllowed,
 	type DispatchKind,
 } from "../domain/state-machine.ts";
-import { GateRefused, HerdrError, IllegalKind, type AppError } from "../errors.ts";
+import {
+	ConfigError,
+	GateRefused,
+	HerdrError,
+	IllegalKind,
+	type AppError,
+} from "../errors.ts";
 import type { Role } from "../domain/types.ts";
 import { ROLE_MODE } from "../domain/types.ts";
 import { ok, type ToolResult } from "../result.ts";
@@ -93,6 +99,30 @@ ${opts.extra}
 
 function codeReviewRoundKey(phaseIndex: number): string {
 	return roundKey(phaseIndex, "code_review");
+}
+
+/** Repo-relative pointer to the task file + artifact a failed launch orphaned. */
+type TaskRef = { readonly task: string; readonly artifact: string };
+
+/**
+ * Re-raise a service failure with the orphaned task/artifact attached.
+ * Tagged errors are immutable, so rebuild rather than mutate; `ref` wins over
+ * any pre-existing details key.
+ */
+function herdrWithTaskRef(e: HerdrError, ref: TaskRef): HerdrError {
+	return new HerdrError({
+		message: e.message,
+		...(e.command !== undefined ? { command: e.command } : {}),
+		details: { ...(e.details ?? {}), ...ref },
+	});
+}
+
+function configWithTaskRef(e: ConfigError, ref: TaskRef): ConfigError {
+	return new ConfigError({
+		message: e.message,
+		...(e.path !== undefined ? { path: e.path } : {}),
+		details: { ...(e.details ?? {}), ...ref },
+	});
 }
 
 /**
@@ -280,6 +310,7 @@ export const dispatchWorkflow = (
 			`${params.kind}-p${state.phase_index}-r${round}-${taskFileMillis}.md`,
 		);
 		yield* fs.writeFile(taskFile, body);
+		const taskRef: TaskRef = { task: rel(taskFile, root), artifact: artifactRel };
 
 		if (role === "reviewer") {
 			state.reviewer_tree_fingerprint = yield* vcsSvc.treeFingerprint(
@@ -313,7 +344,7 @@ export const dispatchWorkflow = (
 			return ok(
 				`task written (no Herdr). Launch ${role} yourself; then workflow_wait.`,
 				{
-					task: rel(taskFile, root),
+					task: taskRef.task,
 					artifact: artifactRel,
 					round,
 					step: state.step,
@@ -329,11 +360,13 @@ export const dispatchWorkflow = (
 				return yield* new HerdrError({
 					message:
 						"floating panes need herdr >= 0.7.4 — run `herdr update`, or set pane_style=regular",
+					details: { ...taskRef },
 				});
 			}
 			if (!(yield* herdr.hasApneaPlugin)) {
 				return yield* new HerdrError({
 					message: `apnea herdr plugin not linked. Run /apnea setup, or: herdr plugin link ${state.package_root}/herdr-plugin`,
+					details: { ...taskRef },
 				});
 			}
 			// Herdr allows one popup. Refuse while a prior floating oneshot is still live.
@@ -347,6 +380,7 @@ export const dispatchWorkflow = (
 						details: {
 							pending_artifact: state.pending_artifact,
 							pending_floating_exit: state.pending_floating_exit,
+							...taskRef,
 						},
 					});
 				}
@@ -357,6 +391,7 @@ export const dispatchWorkflow = (
 			if (Result.isFailure(cmdResult)) {
 				return yield* new HerdrError({
 					message: `floating dispatch requires cmd_oneshot on the role profile: ${cmdResult.failure.message}`,
+					details: { ...taskRef },
 				});
 			}
 			const cmd = cmdResult.success;
@@ -364,8 +399,12 @@ export const dispatchWorkflow = (
 			const exitAbs = taskFile.replace(/\.md$/, ".exit");
 			// Drop stale exit marker so wait cannot see a previous run's code.
 			yield* fs.remove(exitAbs);
-			yield* herdr.writeFloatingTaskScript(scriptAbs, root, cmd, prompt, exitAbs);
-			yield* herdr.openFloatingPane(scriptAbs, root);
+			yield* herdr
+				.writeFloatingTaskScript(scriptAbs, root, cmd, prompt, exitAbs)
+				.pipe(Effect.mapError((e) => herdrWithTaskRef(e, taskRef)));
+			yield* herdr
+				.openFloatingPane(scriptAbs, root)
+				.pipe(Effect.mapError((e) => herdrWithTaskRef(e, taskRef)));
 			// Popups have no pane id — liveness is the exit file; leave role_panes alone.
 			state.pending_pane_id = null;
 			state.pending_pane_label = null;
@@ -382,8 +421,12 @@ export const dispatchWorkflow = (
 		} else {
 			const prefer = state.role_panes[role] ?? null;
 			// Interactive TUI: open harness, wait idle, submit pointer via pane run.
-			const cmd = yield* config.resolveRoleCmd(cfg, role, "interactive");
-			const r = yield* herdr.runInteractivePrompt(role, cmd, prompt, prefer);
+			const cmd = yield* config
+				.resolveRoleCmd(cfg, role, "interactive")
+				.pipe(Effect.mapError((e) => configWithTaskRef(e, taskRef)));
+			const r = yield* herdr
+				.runInteractivePrompt(role, cmd, prompt, prefer)
+				.pipe(Effect.mapError((e) => herdrWithTaskRef(e, taskRef)));
 			launch = {
 				mode: "interactive",
 				pane_id: r.pane_id,
@@ -410,7 +453,7 @@ export const dispatchWorkflow = (
 		const timeoutKey = TIMEOUT_KEY_BY_KIND[params.kind];
 
 		return ok(`dispatched ${params.kind} → ${role} artifact=${artifactRel}`, {
-			task: rel(taskFile, root),
+			task: taskRef.task,
 			artifact: artifactRel,
 			round,
 			step: state.step,
