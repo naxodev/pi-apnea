@@ -2,6 +2,7 @@ export interface ToolOk {
 	ok: true;
 	message: string;
 	data?: Record<string, unknown>;
+	legal_next?: string[];
 }
 
 export interface ToolErr {
@@ -16,8 +17,12 @@ export type ToolResult = ToolOk | ToolErr;
 export function ok(
 	message: string,
 	data?: Record<string, unknown>,
+	legal_next?: string[],
 ): ToolResult {
-	return data ? { ok: true, message, data } : { ok: true, message };
+	const r: ToolOk = { ok: true, message };
+	if (data) r.data = data;
+	if (legal_next?.length) r.legal_next = legal_next;
+	return r;
 }
 
 export function err(

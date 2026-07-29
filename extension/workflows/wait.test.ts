@@ -1,15 +1,18 @@
 import { describe, expect } from "bun:test";
 import { Effect, Fiber, Layer, Result } from "effect";
 import { TestClock } from "effect/testing";
+import type { DispatchKind } from "../domain/state-machine.ts";
 import { statePath } from "../domain/paths.ts";
-import type { RunState } from "../domain/types.ts";
+import type { ApneaConfig, RunState } from "../domain/types.ts";
+import { toToolResult } from "../errors.ts";
 import { fakeConfigLayer } from "../test/fake-config.ts";
 import { makeFakeFileSystem } from "../test/fake-file-system.ts";
 import { fakeHerdrLayer, type FakeHerdrOptions } from "../test/fake-herdr.ts";
 import { fakeVcsLayer } from "../test/fake-vcs.ts";
 import { itEffect } from "../test/it-effect.ts";
 import { RunStoreLive } from "../services/run-store.ts";
-import { waitWorkflow } from "./wait.ts";
+import { dispatchWorkflow } from "./dispatch.ts";
+import { waitWorkflow, type WaitParams } from "./wait.ts";
 
 const ROOT = "/proj";
 
@@ -73,6 +76,89 @@ function layerOf(
 
 function savedState(fakeFs: ReturnType<typeof makeFakeFileSystem>): RunState {
 	return JSON.parse(fakeFs.files.get(statePath(ROOT))!) as RunState;
+}
+
+/**
+ * Drives dispatch/wait as Effects sharing one fake filesystem + one
+ * `TestClock` instance, so a fake `state.json` and clock persist across
+ * separate `wait()` calls — simulating separate `apnea wait` processes
+ * sharing one run.
+ *
+ * `dispatch`/`wait` return Effects rather than plain values: `waitWorkflow`
+ * polls via `Effect.sleep`, and resuming a forked fiber past a `TestClock`
+ * sleep goes through Effect's fiber scheduler, which needs a real async
+ * boundary (confirmed empirically — `Effect.runSync` throws `AsyncFiberError`
+ * for fork+adjust+join even though nothing here does real I/O). So a test
+ * built on this harness stays one `Effect.gen`, `yield*`-ing `dispatch`/`wait`
+ * in sequence and asserting between them, exactly like the other tests in
+ * this file — just run once via `Effect.provide(t.layer)` + `itEffect`.
+ */
+function harness(
+	opts: { timeouts_ms?: Record<string, number>; agentStatus?: string } = {},
+) {
+	const state = baseState({ step: "planning" });
+	const fsFake = seedFs(state);
+	const cfg: ApneaConfig = {
+		profiles: { pi: { cmd_interactive: ["pi"] } },
+		roles: {
+			planner: { profile: "pi" },
+			reviewer: { profile: "pi" },
+			coder: { profile: "pi" },
+		},
+		review_round_cap: 3,
+		timeouts_ms: opts.timeouts_ms ?? { default: 900_000 },
+		pane_style: "regular",
+	};
+	const { layer, fakeFs, herdr } = layerOf(fsFake, {
+		cfg,
+		herdr: {
+			enabled: true,
+			pane: () => ({ ok: true, agent_status: opts.agentStatus ?? "working" }),
+			interactive: {
+				pane_id: "pane-1",
+				label: "apnea:planner:fake",
+				reused: false,
+				prompt_accepted: true,
+				prompt_attempts: 1,
+				last_status: "working",
+			},
+		},
+	});
+
+	const dispatch = (kind: DispatchKind) => dispatchWorkflow({ kind }, ROOT);
+
+	/**
+	 * Forks `waitWorkflow`, advances the TestClock by exactly `budget_ms`
+	 * (mirroring `budgetEnd = startedMs + budget` inside wait.ts itself), then
+	 * joins — one "process" of `apnea wait`. Converts failures through the
+	 * same `toToolResult` the real tool boundary uses, so `.ok`/.error/.data`
+	 * match production shape.
+	 *
+	 * Defaults `poll_ms` to 1000: `TestClock.adjust` only wakes a sleeping
+	 * fiber at its scheduled tick, so an adjust target that lands *between*
+	 * two poll ticks (e.g. the default 2000ms poll with a 5000ms budget)
+	 * leaves the fiber parked past the target and `Fiber.join` never
+	 * resolves. Every `budget_ms` used by these tests is a multiple of 1000.
+	 */
+	const wait = (params: WaitParams) =>
+		Effect.gen(function* () {
+			const budget = params.budget_ms ?? 300_000;
+			const fiber = yield* Effect.forkChild(
+				waitWorkflow({ poll_ms: 1000, ...params }, ROOT),
+			);
+			yield* TestClock.adjust(budget);
+			const r = yield* Effect.result(Fiber.join(fiber));
+			if (Result.isFailure(r)) return toToolResult(r.failure);
+			return r.success;
+		});
+
+	return {
+		layer,
+		dispatch,
+		wait,
+		state: (): RunState => savedState(fakeFs),
+		herdr,
+	};
 }
 
 describe("waitWorkflow (fake layers + TestClock)", () => {
@@ -386,6 +472,100 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 					expect(result.failure.details?.extended_once).toBe(true);
 				}
 			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	itEffect(
+		"the one-time extension is not re-granted by a fresh wait call",
+		() => {
+			// This is the bug chunking introduces: `extendedOnce` used to be a
+			// local, so every new `apnea wait` process would hand the role
+			// another 50% extension and a hung role would never time out.
+			const t = harness({
+				timeouts_ms: { default: 10_000 },
+				agentStatus: "working",
+			});
+			return Effect.gen(function* () {
+				yield* t.dispatch("plan");
+
+				// Budget smaller than the role timeout: each call ends in `pending`.
+				const first = yield* t.wait({ budget_ms: 4_000 });
+				expect(first.ok).toBe(true);
+				expect(first.data?.pending).toBe(true);
+
+				const second = yield* t.wait({ budget_ms: 4_000 });
+				expect(second.data?.pending).toBe(true);
+
+				// Deadline reached mid-call. Status is "working", so the ladder
+				// extends once (deadline 10_000 → 130_000); this call's own
+				// budget (60_000, clock 8_000 → 68_000) still runs out before
+				// that new deadline, so it reports pending again — but the
+				// extension is now persisted.
+				const third = yield* t.wait({ budget_ms: 60_000 });
+				expect(third.ok).toBe(true);
+				expect(third.data?.pending).toBe(true);
+				expect(t.state().pending_extended).toBe(true);
+
+				// A fourth call, with enough budget to reach the extended
+				// deadline (68_000 → 168_000 spans 130_000), must NOT extend
+				// again — it must time out for real.
+				const fourth = yield* t.wait({ budget_ms: 100_000 });
+				expect(fourth.ok).toBe(false);
+				if (!fourth.ok) {
+					expect(fourth.error).toContain("timeout");
+				}
+			}).pipe(Effect.provide(t.layer));
+		},
+	);
+
+	itEffect(
+		"budget spent with deadline remaining reports pending, not timeout",
+		() => {
+			// Exit code 3 vs 1 depends on this distinction: "call wait again"
+			// must never be reported to an agent as "this run is stuck".
+			const t = harness({ timeouts_ms: { default: 600_000 } });
+			return Effect.gen(function* () {
+				yield* t.dispatch("plan");
+				const r = yield* t.wait({ budget_ms: 5_000 });
+				expect(r.ok).toBe(true);
+				expect(r.data?.pending).toBe(true);
+				expect(r.legal_next).toEqual(["workflow_wait"]);
+			}).pipe(Effect.provide(t.layer));
+		},
+	);
+
+	itEffect(
+		"the deadline is measured from dispatch, not from the wait call",
+		() => {
+			const t = harness({ timeouts_ms: { default: 30_000 } });
+			return Effect.gen(function* () {
+				yield* t.dispatch("plan");
+				yield* t.wait({ budget_ms: 20_000 });
+				const stateAfter = t.state();
+				expect(stateAfter.pending_deadline_ms).toBe(
+					(stateAfter.pending_started_at ?? 0) + 30_000,
+				);
+			}).pipe(Effect.provide(t.layer));
+		},
+	);
+
+	itEffect(
+		"a nudge is not re-fired merely because the process is new",
+		() => {
+			// `nudged` used to be a local. Re-nudging every invocation would spam
+			// a working role's pane with duplicate prompts.
+			const t = harness({
+				timeouts_ms: { default: 600_000 },
+				agentStatus: "idle",
+			});
+			return Effect.gen(function* () {
+				yield* t.dispatch("plan");
+				yield* t.wait({ budget_ms: 120_000 });
+				expect(t.state().pending_nudged_at).not.toBeNull();
+				const nudgesAfterFirst = t.herdr.paneRuns.length;
+				yield* t.wait({ budget_ms: 120_000 });
+				expect(t.herdr.paneRuns.length).toBe(nudgesAfterFirst);
+			}).pipe(Effect.provide(t.layer));
 		},
 	);
 });
