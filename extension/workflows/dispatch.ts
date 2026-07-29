@@ -17,6 +17,7 @@ import {
 	toolAllowed,
 	type DispatchKind,
 } from "../domain/state-machine.ts";
+import { timeoutMsForKind } from "../domain/timeouts.ts";
 import { GateRefused, HerdrError, IllegalKind, type AppError } from "../errors.ts";
 import type { Role } from "../domain/types.ts";
 import { ROLE_MODE } from "../domain/types.ts";
@@ -151,6 +152,8 @@ export const dispatchWorkflow = (
 
 		const role = expectedRole(params.kind);
 		const cfg = yield* config.load(root);
+		const dispatchedAt = yield* Clock.currentTimeMillis;
+		const roleTimeoutMs = timeoutMsForKind(params.kind, cfg.timeouts_ms);
 
 		// --- Round numbers (increment ONLY on rework after CHANGES_REQUIRED) ---
 		let round = 1;
@@ -405,6 +408,10 @@ export const dispatchWorkflow = (
 
 		state.pending_artifact = artifactRel;
 		state.pending_role = role;
+		state.pending_started_at = dispatchedAt;
+		state.pending_deadline_ms = dispatchedAt + roleTimeoutMs;
+		state.pending_nudged_at = null;
+		state.pending_extended = false;
 		yield* store.save(state, root);
 
 		const timeoutKey = TIMEOUT_KEY_BY_KIND[params.kind];

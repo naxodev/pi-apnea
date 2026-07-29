@@ -176,6 +176,10 @@ export const waitWorkflow = (
 				state.pending_pane_id = null;
 				state.pending_pane_label = null;
 				state.pending_floating_exit = null;
+				state.pending_started_at = null;
+				state.pending_deadline_ms = null;
+				state.pending_nudged_at = null;
+				state.pending_extended = false;
 				state.reviewer_tree_fingerprint = null;
 				state.last_error = null;
 				yield* store.save(state, root);

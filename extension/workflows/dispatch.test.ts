@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect";
-import { describe, expect } from "bun:test";
+import { TestClock } from "effect/testing";
+import { describe, expect, test } from "bun:test";
 import { statePath } from "../domain/paths.ts";
 import type { ApneaConfig, RunState } from "../domain/types.ts";
 import { fakeConfigLayer } from "../test/fake-config.ts";
@@ -77,12 +78,52 @@ function layerOf(
 		cfg,
 		vcs.layer,
 		herdr.layer,
+		TestClock.layer(),
 	);
 	return { layer, vcs: vcs.recorder, herdr: herdr.recorder, fakeFs };
 }
 
 function savedState(fakeFs: ReturnType<typeof makeFakeFileSystem>): RunState {
 	return JSON.parse(fakeFs.files.get(statePath(ROOT))!) as RunState;
+}
+
+/** Runs dispatchWorkflow against a TestClock pinned to nowMs. */
+async function runDispatch(
+	params: Parameters<typeof dispatchWorkflow>[0],
+	opts: { nowMs: number; cfg?: ApneaConfig },
+): Promise<RunState> {
+	const fsFake = seedFs(baseState({ step: "planning" }));
+	const { layer, fakeFs } = layerOf(fsFake, {
+		herdr: {
+			enabled: true,
+			interactive: {
+				pane_id: "pane-1",
+				label: "apnea:planner:fake",
+				reused: false,
+				prompt_accepted: true,
+				prompt_attempts: 1,
+				last_status: "working",
+			},
+		},
+		cfg: opts.cfg ?? {
+			profiles: { pi: { cmd_interactive: ["pi"] } },
+			roles: {
+				planner: { profile: "pi" },
+				reviewer: { profile: "pi" },
+				coder: { profile: "pi" },
+			},
+			review_round_cap: 3,
+			timeouts_ms: { planning: 1_500_000 },
+			pane_style: "regular",
+		},
+	});
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			yield* TestClock.setTime(opts.nowMs);
+			yield* dispatchWorkflow(params, ROOT);
+		}).pipe(Effect.provide(layer)),
+	);
+	return savedState(fakeFs);
 }
 
 describe("dispatchWorkflow (fake layers)", () => {
@@ -347,4 +388,15 @@ describe("dispatchWorkflow (fake layers)", () => {
 			}).pipe(Effect.provide(layer));
 		},
 	);
+
+	test("dispatch stamps the clock so a later wait can resume the budget", async () => {
+		// Without a persisted start and deadline, every fresh `apnea wait`
+		// process would restart the timeout and a hung role would never fail.
+		const now = 1_700_000_000_000;
+		const state = await runDispatch({ kind: "plan" }, { nowMs: now });
+		expect(state.pending_started_at).toBe(now);
+		expect(state.pending_deadline_ms).toBe(now + 1_500_000);
+		expect(state.pending_nudged_at).toBeNull();
+		expect(state.pending_extended).toBe(false);
+	});
 });
