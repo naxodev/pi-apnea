@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { parseFlags } from "./commands.ts";
+import { OPERATIONS } from "../registry.ts";
+import { parseFlags, SUBS } from "./commands.ts";
 
 describe("parseFlags", () => {
 	test("bare switches land in flags, positionals in rest", () => {
@@ -42,5 +43,26 @@ describe("parseFlags", () => {
 		const { flags, values } = parseFlags(["--=x"]);
 		expect(values.size).toBe(0);
 		expect(flags.has("=x")).toBe(true);
+	});
+});
+
+describe("Pi tool exposure", () => {
+	test("workflow_reset_rounds is not registered as a model tool", () => {
+		// ADR 0002 claims the orchestrator cannot lift its own rework cap.
+		// The only enforceable version of that claim is: the model has no tool
+		// for it. The CLI's TTY gate covers the human path.
+		const tools = OPERATIONS.map((o) => o.tool).filter(Boolean);
+		expect(tools).not.toContain("workflow_reset_rounds");
+	});
+
+	test("every /apnea subcommand has a registry entry", () => {
+		// SUBS used to be a hand-maintained literal that could drift from the
+		// actual dispatch switch below it.
+		for (const sub of SUBS) {
+			if (sub === "help") continue;
+			// resume and abandon are actions on the start operation
+			const verb = sub === "resume" || sub === "abandon" ? "start" : sub;
+			expect(OPERATIONS.some((o) => o.verb === verb)).toBe(true);
+		}
 	});
 });

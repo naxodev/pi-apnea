@@ -8,24 +8,19 @@ import { apneaSetup } from "./setup.ts";
 import { DISPATCH_KINDS } from "../domain/state-machine.ts";
 import type { DispatchKind } from "../domain/state-machine.ts";
 import type { ToolResult } from "../result.ts";
+import { OPERATIONS } from "../registry.ts";
 import { workflowStart } from "./start.ts";
 import { workflowResetRounds, workflowStatus } from "./status.ts";
 import { workflowCommitPhase } from "./commit.ts";
 import { workflowDispatch } from "./dispatch.ts";
 import { workflowWait } from "./wait.ts";
 
-const SUBS = [
-	"setup",
-	"start",
+export const SUBS = [
+	...OPERATIONS.map((o) => o.verb),
 	"resume",
 	"abandon",
-	"status",
-	"dispatch",
-	"wait",
-	"commit",
-	"reset-rounds",
 	"help",
-] as const;
+] as const satisfies readonly string[];
 
 function notify(
 	ctx: {
@@ -88,16 +83,14 @@ export function parseFlags(tokens: string[]): {
 }
 
 function helpText(): string {
+	const lines = OPERATIONS.map(
+		(o) => `  /apnea ${o.verb.padEnd(14)} ${o.summary}`,
+	);
 	return [
 		"Apnea commands (tools remain for the model; you use /apnea):",
-		"  /apnea setup [--project] [--force]   # global profiles; optional project bindings",
-		"  /apnea start <goal> [--allow-dirty] [--slug=name]",
-		"  /apnea resume | abandon | status",
-		"  /apnea wait [--timeout=<ms>]",
-		"  /apnea dispatch <kind> [--rework]",
-		`      kinds: ${DISPATCH_KINDS.join(" | ")}`,
-		"  /apnea commit [--done] [message]",
-		"  /apnea reset-rounds <gate>   (human only; e.g. plan_review or phase-01/code_review)",
+		...lines,
+		"  /apnea resume | abandon        # actions on an existing run",
+		`      dispatch kinds: ${DISPATCH_KINDS.join(" | ")}`,
 		"  /apnea help",
 	].join("\n");
 }
