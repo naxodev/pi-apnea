@@ -1,0 +1,163 @@
+import { Type, type TSchema } from "typebox";
+import { workflowCommitPhase } from "./adapters/commit.ts";
+import { workflowDispatch } from "./adapters/dispatch.ts";
+import { apneaSetup } from "./adapters/setup.ts";
+import { workflowStart } from "./adapters/start.ts";
+import { workflowResetRounds, workflowStatus } from "./adapters/status.ts";
+import { workflowWait } from "./adapters/wait.ts";
+import { DISPATCH_KINDS } from "./domain/state-machine.ts";
+import type { ToolResult } from "./result.ts";
+import type { WaitHooks, WaitParams } from "./workflows/wait.ts";
+
+export type Operation = {
+	/** Pi tool name, or null when the operation is not model-facing. */
+	readonly tool: string | null;
+	/** CLI verb and `/apnea` subcommand. */
+	readonly verb: string;
+	/** One line, shared by the tool description and `--help`. */
+	readonly summary: string;
+	/** Extra prose for the model only; omitted from `--help`. */
+	readonly guidance?: string;
+	readonly params: TSchema;
+	/** Gated behind the TTY check in the CLI; never registered as a tool. */
+	readonly humanOnly?: true;
+	readonly run: (
+		params: Record<string, unknown>,
+		hooks?: WaitHooks,
+	) => Promise<ToolResult>;
+};
+
+// Sourced from domain/state-machine.ts (not hardcoded here) so a new kind
+// added there can't silently drift out of sync with the registry — the same
+// pattern extension/index.ts already uses.
+const DispatchKind = Type.Union(
+	DISPATCH_KINDS.map((kind) => Type.Literal(kind)),
+);
+
+export const OPERATIONS: readonly Operation[] = [
+	{
+		tool: "workflow_start",
+		verb: "start",
+		summary: "Start, resume, or abandon an Apnea run.",
+		guidance:
+			"Start only writes state (step=planning) — it does NOT launch roles. After start succeeds you MUST immediately call dispatch_role kind=plan then workflow_wait. Resume never auto-dispatches. Refuses if state exists or tree dirty (unless allow_dirty).",
+		params: Type.Object({
+			goal: Type.Optional(
+				Type.String({ description: "Run goal (required for action=start)" }),
+			),
+			slug: Type.Optional(
+				Type.String({ description: "Run slug for branch/bookmark" }),
+			),
+			allow_dirty: Type.Optional(Type.Boolean()),
+			action: Type.Optional(
+				Type.Union([
+					Type.Literal("start"),
+					Type.Literal("resume"),
+					Type.Literal("abandon"),
+				]),
+			),
+		}),
+		run: (p) => workflowStart(p as Parameters<typeof workflowStart>[0]),
+	},
+	{
+		tool: "dispatch_role",
+		verb: "dispatch",
+		summary: "Write the task file and launch a role in a Herdr pane.",
+		guidance:
+			"One outstanding dispatch at a time. Pass rework=true only after CHANGES_REQUIRED on the same gate — that is what increments the round counter.",
+		params: Type.Object({
+			kind: DispatchKind,
+			task_markdown: Type.Optional(
+				Type.String({ description: "Extra task body details" }),
+			),
+			rework: Type.Optional(
+				Type.Boolean({
+					description: "Increment round after CHANGES_REQUIRED",
+				}),
+			),
+		}),
+		run: (p) => workflowDispatch(p as Parameters<typeof workflowDispatch>[0]),
+	},
+	{
+		tool: "workflow_wait",
+		verb: "wait",
+		summary: "Wait for the pending artifact's front-matter to be complete.",
+		guidance:
+			"Blocks until the artifact is ready or the role times out. Exit is non-fatal when the call's budget is spent but the role still has time — call again.",
+		// `timeout_ms` was dropped in Task 3: dispatch always stamps the deadline,
+		// so it no-opped for every real run. The role timeout lives in config.
+		params: Type.Object({
+			poll_ms: Type.Optional(Type.Number()),
+			budget_ms: Type.Optional(Type.Number()),
+		}),
+		// Pi blocks in one chunk by design: it streams progress and can be
+		// interrupted, so it has no host shell timeout to fit inside.
+		run: (p, hooks) =>
+			workflowWait(
+				{ budget_ms: Number.MAX_SAFE_INTEGER, ...(p as WaitParams) },
+				hooks,
+			),
+	},
+	{
+		tool: "workflow_commit_phase",
+		verb: "commit",
+		summary: "Verify and commit the current phase, then advance.",
+		guidance:
+			"Requires an APPROVED code review. Runs the phase package's verify commands and refuses on non-zero exit. Pass no_remaining_phases=true to move to the PR description instead of the next phase.",
+		params: Type.Object({
+			message: Type.Optional(Type.String()),
+			no_remaining_phases: Type.Optional(
+				Type.Boolean({
+					description: "If true, go to finishing (PR description) after commit",
+				}),
+			),
+		}),
+		run: (p) =>
+			workflowCommitPhase(p as Parameters<typeof workflowCommitPhase>[0]),
+	},
+	{
+		tool: "workflow_status",
+		verb: "status",
+		summary: "Read-only snapshot of run state and legal next calls.",
+		guidance: "Never mutates. Safe to call at any point.",
+		params: Type.Object({}),
+		run: () => workflowStatus(),
+	},
+	{
+		tool: null,
+		verb: "reset-rounds",
+		summary: "Reset the rework counter for a gate. Human only.",
+		humanOnly: true,
+		params: Type.Object({
+			gate: Type.String({
+				description: "Round key, e.g. plan_review or phase-01/code_review",
+			}),
+		}),
+		run: (p) =>
+			workflowResetRounds(p as Parameters<typeof workflowResetRounds>[0]),
+	},
+	{
+		tool: null,
+		verb: "setup",
+		summary: "Write global profiles and optional project role bindings.",
+		params: Type.Object({
+			project: Type.Optional(Type.Boolean()),
+			force: Type.Optional(Type.Boolean()),
+			agents_md: Type.Optional(Type.Boolean()),
+		}),
+		run: (p) => apneaSetup(p as Parameters<typeof apneaSetup>[0]),
+	},
+];
+
+export function findByVerb(verb: string): Operation | undefined {
+	return OPERATIONS.find((o) => o.verb === verb);
+}
+
+export function findByTool(tool: string): Operation | undefined {
+	return OPERATIONS.find((o) => o.tool === tool);
+}
+
+/** Canonical tool name → CLI verb, or null when not model-facing. */
+export function toolToVerb(tool: string): string | null {
+	return findByTool(tool)?.verb ?? null;
+}
