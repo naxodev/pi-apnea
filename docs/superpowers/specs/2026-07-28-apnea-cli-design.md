@@ -90,7 +90,7 @@ rendering requires regardless.
 |---|---|
 | `workflow_start` | `apnea start <goal>` / `resume` / `abandon` |
 | `dispatch_role` | `apnea dispatch <kind> [--rework]` |
-| `workflow_wait` | `apnea wait [--timeout=<ms>]` |
+| `workflow_wait` | `apnea wait [--budget=<ms>]` (`--timeout` aliases it) |
 | `workflow_commit_phase` | `apnea commit [--done] [msg]` |
 | `workflow_status` | `apnea status` |
 | *(CLI/slash only)* | `apnea reset-rounds <gate>` |
@@ -165,9 +165,21 @@ Exit 3 pairing with `ok:true` is deliberate: nothing failed, the role is still w
 exit code distinguishes "call again" from "ready" for shell callers; JSON callers read
 `data.pending`.
 
-Pi is unaffected in feel — it passes a large `--timeout` and keeps streaming `onUpdate` in
-one long call. Both drivers consult the same persisted deadline, so the guardrail is
-identical; Pi just spends its budget in one chunk.
+Pi is unaffected in feel — it passes a large budget and keeps streaming `onUpdate` in one
+long call. Both drivers consult the same persisted deadline, so the guardrail is identical;
+Pi just spends its budget in one chunk.
+
+**Amended during implementation (2026-07-29).** `timeout_ms` is removed from `WaitParams`
+and the tool schema. Once dispatch always stamps the deadline it no-opped for every real
+run while still being advertised, so a caller passing it would silently get the config
+default. `--timeout` survives as an alias for `--budget`, which is what a caller passing it
+actually means: how long *this call* blocks. The role's timeout lives in config only.
+
+Persisting the deadline and the extension flag fixes the top two rungs of the recovery
+ladder but not the idle-nudge rung: `idleSince` and the grace windows remain
+per-invocation. Rather than add a fifth state field, the grace windows are anchored at
+dispatch time and `budget_ms` is floored near 120s — below that a single call cannot
+accommodate the 90s idle rung at all, so no legal budget can silently disable it.
 
 ## Human gate
 
