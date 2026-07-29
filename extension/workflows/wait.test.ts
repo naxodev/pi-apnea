@@ -1,8 +1,9 @@
 import { describe, expect } from "bun:test";
-import { Effect, Fiber, Layer, Result } from "effect";
+import { Effect, Fiber, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { statePath } from "../domain/paths.ts";
 import type { RunState } from "../domain/types.ts";
+import { expectFailure } from "../test/expect-failure.ts";
 import { fakeConfigLayer } from "../test/fake-config.ts";
 import { makeFakeFileSystem } from "../test/fake-file-system.ts";
 import { fakeHerdrLayer, type FakeHerdrOptions } from "../test/fake-herdr.ts";
@@ -120,15 +121,10 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 				);
 				yield* TestClock.adjust(6_000);
 				const result = yield* Effect.result(Fiber.join(fiber));
-				expect(Result.isFailure(result)).toBe(true);
-				if (Result.isFailure(result)) {
-					expect(result.failure._tag).toBe("WaitTimeout");
-					if (result.failure._tag === "WaitTimeout") {
-						expect(result.failure.artifact).toBe(
-							".apnea/artifacts/phase-01/round-1/code-review.md",
-						);
-					}
-				}
+				const e = expectFailure(result, "WaitTimeout");
+				expect(e.artifact).toBe(
+					".apnea/artifacts/phase-01/round-1/code-review.md",
+				);
 				expect(savedState(fakeFs).step).toBe("code_review");
 			}).pipe(Effect.provide(layer));
 		},
@@ -182,10 +178,7 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 				// would leave the fiber parked in a virtual sleep forever and this
 				// join would hang. It resolves only because raceFirst interrupts it.
 				const result = yield* Effect.result(Fiber.join(fiber));
-				expect(Result.isFailure(result)).toBe(true);
-				if (Result.isFailure(result)) {
-					expect(result.failure._tag).toBe("WaitAborted");
-				}
+				expectFailure(result, "WaitAborted");
 				expect(savedState(fakeFs).last_error).toBe("workflow_wait aborted");
 			}).pipe(Effect.provide(layer));
 		},
@@ -209,11 +202,9 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 				);
 				yield* TestClock.adjust(2_100); // past the 2000ms flush window
 				const result = yield* Effect.result(Fiber.join(fiber));
-				expect(Result.isFailure(result)).toBe(true);
-				if (Result.isFailure(result) && result.failure._tag === "HerdrError") {
-					expect(result.failure.details?.exit_code).toBe(129);
-					expect(String(result.failure.details?.hint)).toMatch(/Hangup/i);
-				}
+				const e = expectFailure(result, "HerdrError");
+				expect(e.details?.exit_code).toBe(129);
+				expect(String(e.details?.hint)).toMatch(/Hangup/i);
 				expect(savedState(fakeFs).pending_floating_exit).toBeNull();
 			}).pipe(Effect.provide(layer));
 		},
@@ -273,10 +264,8 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 
 				yield* TestClock.adjust(3_000); // past the grace
 				const result = yield* Effect.result(Fiber.join(fiber));
-				expect(Result.isFailure(result)).toBe(true);
-				if (Result.isFailure(result) && result.failure._tag === "HerdrError") {
-					expect(result.failure.message).toContain("pane gone");
-				}
+				const e = expectFailure(result, "HerdrError");
+				expect(e.message).toContain("pane gone");
 				expect(savedState(fakeFs).step).toBe("coding");
 			}).pipe(Effect.provide(layer));
 		},
@@ -305,11 +294,9 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 				);
 				yield* TestClock.adjust(20_000); // 12s grace + 4 shell-only polls
 				const result = yield* Effect.result(Fiber.join(fiber));
-				expect(Result.isFailure(result)).toBe(true);
-				if (Result.isFailure(result) && result.failure._tag === "HerdrError") {
-					expect(result.failure.message).toContain("harness exited");
-					expect(result.failure.details?.foreground).toEqual(["zsh"]);
-				}
+				const e = expectFailure(result, "HerdrError");
+				expect(e.message).toContain("harness exited");
+				expect(e.details?.foreground).toEqual(["zsh"]);
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -377,10 +364,8 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 
 				yield* TestClock.adjust(115_000); // cumulative 225000, past 100000+120000
 				const result = yield* Effect.result(Fiber.join(fiber));
-				expect(Result.isFailure(result)).toBe(true);
-				if (Result.isFailure(result) && result.failure._tag === "WaitTimeout") {
-					expect(result.failure.details?.extended_once).toBe(true);
-				}
+				const e = expectFailure(result, "WaitTimeout");
+				expect(e.details?.extended_once).toBe(true);
 			}).pipe(Effect.provide(layer));
 		},
 	);

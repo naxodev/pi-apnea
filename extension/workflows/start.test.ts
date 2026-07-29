@@ -16,8 +16,9 @@ import {
 	workflowResetRounds,
 	workflowStatus,
 } from "../adapters/status.ts";
-import { makeFakeFileSystem } from "../test/fake-file-system.ts";
+import { expectFailure } from "../test/expect-failure.ts";
 import { fakeConfigLayer } from "../test/fake-config.ts";
+import { makeFakeFileSystem } from "../test/fake-file-system.ts";
 import { fakeVcsLayer } from "../test/fake-vcs.ts";
 import { itEffect } from "../test/it-effect.ts";
 import { RunStoreLive } from "../services/run-store.ts";
@@ -50,13 +51,8 @@ describe("startWorkflow (fake layers)", () => {
 			const r = yield* Effect.result(
 				startWorkflow({ goal: "x", slug: "x" }, ROOT),
 			);
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure") {
-				expect(r.failure._tag).toBe("GateRefused");
-				if (r.failure._tag === "GateRefused") {
-					expect(r.failure.gate).toBe("clean_tree");
-				}
-			}
+			const e = expectFailure(r, "GateRefused");
+			expect(e.gate).toBe("clean_tree");
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -100,10 +96,7 @@ describe("startWorkflow (fake layers)", () => {
 			const r = yield* Effect.result(
 				startWorkflow({ goal: "x", slug: "x" }, ROOT),
 			);
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure") {
-				expect(r.failure._tag).toBe("ConfigError");
-			}
+			expectFailure(r, "ConfigError");
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -127,11 +120,8 @@ describe("startWorkflow (fake layers)", () => {
 			const r = yield* Effect.result(
 				startWorkflow({ goal: "x", slug: "x" }, ROOT),
 			);
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure") {
-				expect(r.failure._tag).toBe("VcsError");
-				expect(r.failure.message).toContain("no .jj or .git");
-			}
+			const e = expectFailure(r, "VcsError");
+			expect(e.message).toContain("no .jj or .git");
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -166,11 +156,9 @@ describe("startWorkflow (fake layers)", () => {
 			const r = yield* Effect.result(
 				startWorkflow({ goal: "nope" }, ROOT),
 			);
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure" && r.failure._tag === "GateRefused") {
-				expect(r.failure.message).toContain("already exists");
-				expect(r.failure.details?.slug).toBe("ex");
-			}
+			const e = expectFailure(r, "GateRefused");
+			expect(e.message).toContain("already exists");
+			expect(e.details?.slug).toBe("ex");
 		}).pipe(Effect.provide(layer));
 	});
 

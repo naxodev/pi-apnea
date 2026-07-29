@@ -33,6 +33,9 @@ export class ConfigError extends Schema.TaggedErrorClass<ConfigError>()(
 	{
 		message: Schema.String,
 		path: Schema.optional(Schema.String),
+		details: Schema.optional(
+			Schema.Record(Schema.String, Schema.Unknown),
+		),
 	},
 ) {}
 
@@ -197,10 +200,15 @@ export function toToolResult(e: AppError): ToolErr {
 					data: { step: e.step, kind: e.kind, allowed: e.allowed },
 				},
 			);
-		case "ConfigError":
+		case "ConfigError": {
+			const data = {
+				...(e.path !== undefined ? { path: e.path } : {}),
+				...(e.details ?? {}),
+			};
 			return err(e.message, {
-				data: e.path !== undefined ? { path: e.path } : undefined,
+				data: Object.keys(data).length > 0 ? data : undefined,
 			});
+		}
 		case "StateCorrupt":
 			return err(`corrupt state at ${e.path}: ${e.message}`, {
 				data: { path: e.path },

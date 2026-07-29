@@ -1,6 +1,7 @@
 import { describe, expect } from "bun:test";
 import { Effect, Layer } from "effect";
 import { globalConfigPath, projectConfigPath } from "../domain/paths.ts";
+import { expectFailure } from "../test/expect-failure.ts";
 import { makeFakeFileSystem } from "../test/fake-file-system.ts";
 import { itEffect } from "../test/it-effect.ts";
 import { Config, ConfigLive } from "./config.ts";
@@ -28,12 +29,9 @@ describe("Config service (fake FileSystem)", () => {
 		return Effect.gen(function* () {
 			const config = yield* Config;
 			const r = yield* Effect.result(config.load("/proj"));
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure") {
-				expect(r.failure._tag).toBe("ConfigError");
-				expect(r.failure.message).toContain("missing global config");
-				expect(r.failure.path).toBe(globalConfigPath());
-			}
+			const e = expectFailure(r, "ConfigError");
+			expect(e.message).toContain("missing global config");
+			expect(e.path).toBe(globalConfigPath());
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -43,11 +41,9 @@ describe("Config service (fake FileSystem)", () => {
 		return Effect.gen(function* () {
 			const config = yield* Config;
 			const r = yield* Effect.result(config.load("/proj"));
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure") {
-				expect(r.failure.message).toContain("invalid JSON");
-				expect(r.failure.path).toBe(g);
-			}
+			const e = expectFailure(r, "ConfigError");
+			expect(e.message).toContain("invalid JSON");
+			expect(e.path).toBe(g);
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -80,10 +76,8 @@ describe("Config service (fake FileSystem)", () => {
 		return Effect.gen(function* () {
 			const config = yield* Config;
 			const r = yield* Effect.result(config.load("/proj"));
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure") {
-				expect(r.failure.message).toContain("must not set profiles");
-			}
+			const e = expectFailure(r, "ConfigError");
+			expect(e.message).toContain("must not set profiles");
 		}).pipe(Effect.provide(layer));
 	});
 
@@ -98,10 +92,8 @@ describe("Config service (fake FileSystem)", () => {
 				roles: { ...cfg.roles, planner: { profile: "nope" } },
 			};
 			const r = yield* Effect.result(config.resolveRoleCmd(bad, "planner"));
-			expect(r._tag).toBe("Failure");
-			if (r._tag === "Failure") {
-				expect(r.failure.message).toContain("unknown profile nope");
-			}
+			const e = expectFailure(r, "ConfigError");
+			expect(e.message).toContain("unknown profile nope");
 		}).pipe(Effect.provide(layer));
 	});
 
