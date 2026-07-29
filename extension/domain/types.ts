@@ -62,6 +62,25 @@ export interface RunState {
 	 */
 	pending_floating_exit: string | null;
 	/**
+	 * Epoch ms when the in-flight dispatch was launched. Null when idle.
+	 * Persisted so a chunked `workflow_wait` measures elapsed time from the
+	 * dispatch, not from the start of the current process.
+	 */
+	pending_started_at: number | null;
+	/**
+	 * Epoch ms after which the in-flight dispatch is considered timed out.
+	 * Extensions granted by the recovery ladder move this forward and are
+	 * saved, so the budget cannot be silently reset by re-invoking wait.
+	 */
+	pending_deadline_ms: number | null;
+	/**
+	 * Epoch ms of the last idle-nudge sent to the role pane. Persisted so a
+	 * fresh process does not re-nudge a role it already nudged.
+	 */
+	pending_nudged_at: number | null;
+	/** True once the one-time deadline extension has been consumed. */
+	pending_extended: boolean;
+	/**
 	 * Last known live pane per role, keyed by role name.
 	 * Reuse is by pane_id only (never by scanning ambiguous labels).
 	 */
