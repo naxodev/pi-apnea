@@ -90,11 +90,15 @@ function savedState(fakeFs: ReturnType<typeof makeFakeFileSystem>): RunState {
 /** Runs dispatchWorkflow against a TestClock pinned to nowMs. */
 async function runDispatch(
 	params: Parameters<typeof dispatchWorkflow>[0],
-	opts: { nowMs: number; cfg?: ApneaConfig },
+	opts: {
+		nowMs: number;
+		cfg?: ApneaConfig;
+		herdr?: Parameters<typeof fakeHerdrLayer>[0];
+	},
 ): Promise<RunState> {
 	const fsFake = seedFs(baseState({ step: "planning" }));
 	const { layer, fakeFs } = layerOf(fsFake, {
-		herdr: {
+		herdr: opts.herdr ?? {
 			enabled: true,
 			interactive: {
 				pane_id: "pane-1",
@@ -394,6 +398,22 @@ describe("dispatchWorkflow (fake layers)", () => {
 		// process would restart the timeout and a hung role would never fail.
 		const now = 1_700_000_000_000;
 		const state = await runDispatch({ kind: "plan" }, { nowMs: now });
+		expect(state.pending_started_at).toBe(now);
+		expect(state.pending_deadline_ms).toBe(now + 1_500_000);
+		expect(state.pending_nudged_at).toBeNull();
+		expect(state.pending_extended).toBe(false);
+	});
+
+	test("no-Herdr dispatch also stamps the clock (manual launch still owes wait a deadline)", async () => {
+		// This branch tells the operator to launch the role by hand and then
+		// call workflow_wait. It offers the same workflow_wait contract as the
+		// Herdr-driven branches, so it must not be the one path left with a
+		// null deadline that silently falls back to the un-timed default.
+		const now = 1_700_000_000_000;
+		const state = await runDispatch(
+			{ kind: "plan" },
+			{ nowMs: now, herdr: { enabled: false } },
+		);
 		expect(state.pending_started_at).toBe(now);
 		expect(state.pending_deadline_ms).toBe(now + 1_500_000);
 		expect(state.pending_nudged_at).toBeNull();

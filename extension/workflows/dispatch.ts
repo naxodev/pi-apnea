@@ -312,6 +312,10 @@ export const dispatchWorkflow = (
 			state.pending_pane_id = null;
 			state.pending_pane_label = null;
 			state.pending_floating_exit = null;
+			state.pending_started_at = dispatchedAt;
+			state.pending_deadline_ms = dispatchedAt + roleTimeoutMs;
+			state.pending_nudged_at = null;
+			state.pending_extended = false;
 			yield* store.save(state, root);
 			return ok(
 				`task written (no Herdr). Launch ${role} yourself; then workflow_wait.`,
