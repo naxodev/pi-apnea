@@ -246,7 +246,7 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 							);
 							return;
 						}
-						const r = await workflowWait({ timeout_ms: parsed });
+						const r = await workflowWait({ budget_ms: parsed });
 						notify(ctx, r);
 						return;
 					}

@@ -94,7 +94,14 @@ function savedState(fakeFs: ReturnType<typeof makeFakeFileSystem>): RunState {
  * this file — just run once via `Effect.provide(t.layer)` + `itEffect`.
  */
 function harness(
-	opts: { timeouts_ms?: Record<string, number>; agentStatus?: string } = {},
+	opts: {
+		timeouts_ms?: Record<string, number>;
+		agentStatus?: string;
+		/** Disable Herdr entirely — `lastStatus` stays "waiting" forever, so
+		 * the recovery ladder (nudge/extend) never engages. Used by tests that
+		 * only care about deadline arithmetic. */
+		herdrEnabled?: boolean;
+	} = {},
 ) {
 	const state = baseState({ step: "planning" });
 	const fsFake = seedFs(state);
@@ -112,7 +119,7 @@ function harness(
 	const { layer, fakeFs, herdr } = layerOf(fsFake, {
 		cfg,
 		herdr: {
-			enabled: true,
+			enabled: opts.herdrEnabled ?? true,
 			pane: () => ({ ok: true, agent_status: opts.agentStatus ?? "working" }),
 			interactive: {
 				pane_id: "pane-1",
@@ -198,6 +205,8 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 				step: "code_review",
 				pending_artifact: ".apnea/artifacts/phase-01/round-1/code-review.md",
 				pending_role: "reviewer",
+				pending_started_at: 0,
+				pending_deadline_ms: 5_000,
 			});
 			const fsFake = seedFs(state, {
 				[`${ROOT}/.apnea/artifacts/phase-01/round-1/code-review.md`]:
@@ -206,7 +215,7 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 			const { layer, fakeFs } = layerOf(fsFake);
 			return Effect.gen(function* () {
 				const fiber = yield* Effect.forkChild(
-					waitWorkflow({ timeout_ms: 5_000, poll_ms: 1_000 }, ROOT),
+					waitWorkflow({ poll_ms: 1_000 }, ROOT),
 				);
 				yield* TestClock.adjust(6_000);
 				const result = yield* Effect.result(Fiber.join(fiber));
@@ -263,7 +272,7 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 			const controller = new AbortController();
 			return Effect.gen(function* () {
 				const fiber = yield* Effect.forkChild(
-					waitWorkflow({ timeout_ms: 60_000, poll_ms: 5_000 }, ROOT, {
+					waitWorkflow({ poll_ms: 5_000 }, ROOT, {
 						signal: controller.signal,
 					}),
 				);
@@ -295,7 +304,7 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 			const { layer, fakeFs } = layerOf(fsFake);
 			return Effect.gen(function* () {
 				const fiber = yield* Effect.forkChild(
-					waitWorkflow({ timeout_ms: 60_000, poll_ms: 500 }, ROOT),
+					waitWorkflow({ poll_ms: 500 }, ROOT),
 				);
 				yield* TestClock.adjust(2_100); // past the 2000ms flush window
 				const result = yield* Effect.result(Fiber.join(fiber));
@@ -324,7 +333,7 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 			const { layer, fakeFs } = layerOf(fsFake);
 			return Effect.gen(function* () {
 				const fiber = yield* Effect.forkChild(
-					waitWorkflow({ timeout_ms: 60_000, poll_ms: 500 }, ROOT),
+					waitWorkflow({ poll_ms: 500 }, ROOT),
 				);
 				yield* TestClock.adjust(500);
 				// Oneshot finishes writing just as the process exits — well inside
@@ -356,7 +365,7 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 			});
 			return Effect.gen(function* () {
 				const fiber = yield* Effect.forkChild(
-					waitWorkflow({ timeout_ms: 60_000, poll_ms: 1_000 }, ROOT),
+					waitWorkflow({ poll_ms: 1_000 }, ROOT),
 				);
 				yield* TestClock.adjust(10_000); // before the 12s grace
 				expect(fiber.pollUnsafe()).toBeUndefined();
@@ -391,7 +400,7 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 			});
 			return Effect.gen(function* () {
 				const fiber = yield* Effect.forkChild(
-					waitWorkflow({ timeout_ms: 60_000, poll_ms: 1_000 }, ROOT),
+					waitWorkflow({ poll_ms: 1_000 }, ROOT),
 				);
 				yield* TestClock.adjust(20_000); // 12s grace + 4 shell-only polls
 				const result = yield* Effect.result(Fiber.join(fiber));
@@ -423,7 +432,7 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 			});
 			return Effect.gen(function* () {
 				const fiber = yield* Effect.forkChild(
-					waitWorkflow({ timeout_ms: 600_000, poll_ms: 1_000 }, ROOT),
+					waitWorkflow({ poll_ms: 1_000 }, ROOT),
 				);
 				yield* TestClock.adjust(95_000); // past the 90s idle-stall threshold
 				expect(herdr.paneRuns.length).toBe(1);
@@ -444,11 +453,14 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 	itEffect(
 		"still working at the deadline extends the budget once by max(50%, 120000), then times out without a second extension",
 		() => {
+			const timeout = 100_000; // 50% = 50000 < 120000 floor, so extension = 120000
 			const state = baseState({
 				step: "coding",
 				pending_artifact: ".apnea/artifacts/phase-01/round-1/coder-result.md",
 				pending_role: "coder",
 				pending_pane_id: "pane-1",
+				pending_started_at: 0,
+				pending_deadline_ms: timeout,
 			});
 			const fsFake = seedFs(state);
 			const { layer } = layerOf(fsFake, {
@@ -457,10 +469,9 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 					pane: () => ({ ok: true, agent_status: "working" }),
 				},
 			});
-			const timeout = 100_000; // 50% = 50000 < 120000 floor, so extension = 120000
 			return Effect.gen(function* () {
 				const fiber = yield* Effect.forkChild(
-					waitWorkflow({ timeout_ms: timeout, poll_ms: 1_000 }, ROOT),
+					waitWorkflow({ poll_ms: 1_000 }, ROOT),
 				);
 				yield* TestClock.adjust(110_000); // past the original deadline
 				expect(fiber.pollUnsafe()).toBeUndefined();
@@ -481,38 +492,36 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 			// This is the bug chunking introduces: `extendedOnce` used to be a
 			// local, so every new `apnea wait` process would hand the role
 			// another 50% extension and a hung role would never time out.
+			// Every budget below is at the MIN_BUDGET_MS floor (120_000).
 			const t = harness({
-				timeouts_ms: { default: 10_000 },
+				timeouts_ms: { default: 150_000 },
 				agentStatus: "working",
 			});
 			return Effect.gen(function* () {
 				yield* t.dispatch("plan");
 
-				// Budget smaller than the role timeout: each call ends in `pending`.
-				const first = yield* t.wait({ budget_ms: 4_000 });
+				// Budget smaller than the role timeout: ends in `pending`.
+				const first = yield* t.wait({ budget_ms: 120_000 });
 				expect(first.ok).toBe(true);
 				expect(first.data?.pending).toBe(true);
 
-				const second = yield* t.wait({ budget_ms: 4_000 });
+				// Deadline (150_000) reached mid-call (clock 120_000 → 240_000).
+				// Status is "working", so the ladder extends once: new deadline
+				// = 150_000 + max(150_000*0.5, 120_000) = 270_000. This call's
+				// own budgetEnd (240_000) still lands before that, so it reports
+				// pending again — but the extension is now persisted.
+				const second = yield* t.wait({ budget_ms: 120_000 });
+				expect(second.ok).toBe(true);
 				expect(second.data?.pending).toBe(true);
-
-				// Deadline reached mid-call. Status is "working", so the ladder
-				// extends once (deadline 10_000 → 130_000); this call's own
-				// budget (60_000, clock 8_000 → 68_000) still runs out before
-				// that new deadline, so it reports pending again — but the
-				// extension is now persisted.
-				const third = yield* t.wait({ budget_ms: 60_000 });
-				expect(third.ok).toBe(true);
-				expect(third.data?.pending).toBe(true);
 				expect(t.state().pending_extended).toBe(true);
 
-				// A fourth call, with enough budget to reach the extended
-				// deadline (68_000 → 168_000 spans 130_000), must NOT extend
-				// again — it must time out for real.
-				const fourth = yield* t.wait({ budget_ms: 100_000 });
-				expect(fourth.ok).toBe(false);
-				if (!fourth.ok) {
-					expect(fourth.error).toContain("timeout");
+				// A third call, budget 120_000 from clock 240_000 (→ 360_000),
+				// spans the extended deadline (270_000). Must NOT extend again —
+				// it must time out for real.
+				const third = yield* t.wait({ budget_ms: 120_000 });
+				expect(third.ok).toBe(false);
+				if (!third.ok) {
+					expect(third.error).toContain("timeout");
 				}
 			}).pipe(Effect.provide(t.layer));
 		},
@@ -526,7 +535,7 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 			const t = harness({ timeouts_ms: { default: 600_000 } });
 			return Effect.gen(function* () {
 				yield* t.dispatch("plan");
-				const r = yield* t.wait({ budget_ms: 5_000 });
+				const r = yield* t.wait({ budget_ms: 120_000 }); // MIN_BUDGET_MS floor
 				expect(r.ok).toBe(true);
 				expect(r.data?.pending).toBe(true);
 				expect(r.legal_next).toEqual(["workflow_wait"]);
@@ -535,16 +544,58 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 	);
 
 	itEffect(
-		"the deadline is measured from dispatch, not from the wait call",
+		"a budget under the floor is refused, naming the floor",
 		() => {
-			const t = harness({ timeouts_ms: { default: 30_000 } });
+			// MIN_BUDGET_MS exists because a smaller budget can't fit the 90s
+			// idle-nudge rung inside one call — see wait.ts's module doc.
+			const t = harness({ timeouts_ms: { default: 600_000 } });
 			return Effect.gen(function* () {
 				yield* t.dispatch("plan");
-				yield* t.wait({ budget_ms: 20_000 });
-				const stateAfter = t.state();
-				expect(stateAfter.pending_deadline_ms).toBe(
-					(stateAfter.pending_started_at ?? 0) + 30_000,
+				const r = yield* t.wait({ budget_ms: 60_000 });
+				expect(r.ok).toBe(false);
+				if (!r.ok) {
+					expect(r.error).toContain("120000");
+				}
+			}).pipe(Effect.provide(t.layer));
+		},
+	);
+
+	itEffect(
+		"the deadline is measured from dispatch, not from the wait call",
+		() => {
+			// Regression target: an implementation that recomputes the deadline
+			// from its own `Clock.currentTimeMillis` read at wait-call start
+			// (ignoring `state.pending_deadline_ms`) would time out ~30s after
+			// *this* call started (~t=55_000), not ~30s after dispatch
+			// (~t=30_000). Herdr disabled so `lastStatus` stays "waiting" and
+			// the recovery ladder can't extend the deadline out from under us.
+			const t = harness({
+				timeouts_ms: { default: 30_000 },
+				herdrEnabled: false,
+			});
+			return Effect.gen(function* () {
+				yield* t.dispatch("plan");
+				yield* TestClock.adjust(25_000); // 25s pass before the agent calls wait
+
+				const fiber = yield* Effect.forkChild(
+					waitWorkflow({ budget_ms: 120_000, poll_ms: 2_000 }, ROOT),
 				);
+
+				yield* TestClock.adjust(4_000); // cumulative 29s: still short of t=30s
+				expect(fiber.pollUnsafe()).toBeUndefined();
+
+				yield* TestClock.adjust(2_000); // cumulative 31s: past t=30s
+				// A dispatch-anchored deadline must have resolved by now; a
+				// wait-call-anchored deadline (bug) would still be parked until
+				// t=55s, so `pollUnsafe` would stay undefined here — the
+				// `toBeDefined` below is what fails under that regression.
+				expect(fiber.pollUnsafe()).toBeDefined();
+
+				const result = yield* Effect.result(Fiber.join(fiber));
+				expect(Result.isFailure(result)).toBe(true);
+				if (Result.isFailure(result)) {
+					expect(result.failure._tag).toBe("WaitTimeout");
+				}
 			}).pipe(Effect.provide(t.layer));
 		},
 	);

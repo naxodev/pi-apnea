@@ -110,12 +110,11 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Wait for pending artifact front-matter (async; Esc-cancellable). Agent-status is liveness only; shell-only pane without artifact fails fast. Advances state machine on success.",
 		parameters: Type.Object({
-			timeout_ms: Type.Optional(Type.Number()),
 			poll_ms: Type.Optional(Type.Number()),
 		}),
 		async execute(
 			_id: string,
-			params: { timeout_ms?: number; poll_ms?: number },
+			params: { poll_ms?: number },
 			signal: AbortSignal | undefined,
 			onUpdate:
 				| ((partial: {
@@ -127,7 +126,6 @@ export default function (pi: ExtensionAPI) {
 			return toolContent(
 				await workflowWait(
 					{
-						timeout_ms: params.timeout_ms,
 						poll_ms: params.poll_ms,
 					},
 					{

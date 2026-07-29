@@ -15,8 +15,8 @@ describe("parseFlags", () => {
 
 	// `rest` never sees a `--`-prefixed token, so a `--key=value` option is only
 	// reachable through `values`. Reading it back out of `rest` silently drops
-	// the option — `/apnea wait --timeout=3600000` would fall back to the 900s
-	// default and time out mid-round.
+	// the option — `/apnea wait --timeout=3600000` would fall back to the
+	// default budget instead of the caller's chosen one.
 	test("--key=value options are exposed as values, never in rest", () => {
 		const { flags, values, rest } = parseFlags(["--timeout=3600000"]);
 		expect(values.get("timeout")).toBe("3600000");

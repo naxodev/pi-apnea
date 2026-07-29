@@ -26,7 +26,6 @@ import { RunStore } from "../services/run-store.ts";
 import { Vcs } from "../services/vcs.ts";
 
 export type WaitParams = {
-	timeout_ms?: number;
 	poll_ms?: number;
 	/**
 	 * Wall-clock this single call may block for. Defaults to 300s so the call
@@ -38,6 +37,14 @@ export type WaitParams = {
 
 /** Shell-safe default: under Claude Code's 600s cap with room to spare. */
 export const DEFAULT_BUDGET_MS = 300_000;
+
+/**
+ * A budget below this can't fit the 90s idle-nudge rung (plus the 12s grace
+ * before liveness checks start) inside a single call. `idleSince` stays a
+ * per-call local — see the module doc — so a smaller budget would silently
+ * reset the idle timer every invocation and the role would never be nudged.
+ */
+export const MIN_BUDGET_MS = 120_000;
 
 export type WaitHooks = {
 	signal?: AbortSignal;
@@ -90,12 +97,17 @@ export const waitWorkflow = (
 		const cfg = yield* config.load(root);
 
 		const budget = params.budget_ms ?? DEFAULT_BUDGET_MS;
+		if (budget < MIN_BUDGET_MS) {
+			return yield* new GateRefused({
+				gate: "budget_floor",
+				message: `budget_ms must be >= ${MIN_BUDGET_MS} (need room for the 90s idle nudge + 12s grace); got ${budget}`,
+			});
+		}
 		const startedMs = yield* Clock.currentTimeMillis;
 
 		// Legacy state (dispatched before the clock existed) starts its budget now.
 		const dispatchedAt = state.pending_started_at ?? startedMs;
-		const fallbackTimeout =
-			params.timeout_ms ?? cfg.timeouts_ms.default ?? 900_000;
+		const fallbackTimeout = cfg.timeouts_ms.default ?? 900_000;
 		if (state.pending_deadline_ms == null) {
 			state.pending_started_at = dispatchedAt;
 			state.pending_deadline_ms = dispatchedAt + fallbackTimeout;
@@ -330,7 +342,7 @@ export const waitWorkflow = (
 						const info = yield* herdr.paneGet(state.pending_pane_id);
 						if (!info.ok) {
 							lastStatus = "pane_missing";
-							if (now - startedMs > graceMs) {
+							if (now - dispatchedAt > graceMs) {
 								state.last_error = `role pane missing while waiting for ${pendingArtifact}`;
 								yield* store.save(state, root);
 								return yield* new HerdrError({
@@ -348,7 +360,7 @@ export const waitWorkflow = (
 								if (idleSince == null) idleSince = now;
 								else if (
 									now - idleSince >= idleNudgeAfterMs &&
-									now - startedMs > graceMs
+									now - dispatchedAt > graceMs
 								) {
 									yield* tryNudge("idle stall");
 								}
@@ -356,7 +368,7 @@ export const waitWorkflow = (
 								idleSince = null;
 							}
 
-							if (now - startedMs > graceMs) {
+							if (now - dispatchedAt > graceMs) {
 								const names = yield* herdr.paneForegroundNames(
 									state.pending_pane_id,
 								);
@@ -439,7 +451,7 @@ export const waitWorkflow = (
 						break;
 					}
 
-					const elapsed = Math.round((now - startedMs) / 1000);
+					const elapsed = Math.round((now - dispatchedAt) / 1000);
 					hooks.onUpdate?.({
 						content: [
 							{
