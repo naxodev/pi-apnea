@@ -55,4 +55,16 @@ describe("OPERATIONS", () => {
 		expect(toolToVerb("workflow_reset_rounds")).toBeNull();
 		expect(findByTool("workflow_status")?.verb).toBe("status");
 	});
+
+	test("start refuses a missing goal instead of throwing", async () => {
+		// Regression guard for the registry owning the same validation
+		// index.ts's execute() applies before calling workflowStart — without
+		// it, action=start with no goal reaches slugify(undefined) downstream
+		// and throws instead of returning a clean refusal.
+		const result = await findByVerb("start")!.run({ action: "start" });
+		expect(result).toEqual({
+			ok: false,
+			error: "goal is required when action=start",
+		});
+	});
 });

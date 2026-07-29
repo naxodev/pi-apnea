@@ -57,7 +57,25 @@ export const OPERATIONS: readonly Operation[] = [
 				]),
 			),
 		}),
-		run: (p) => workflowStart(p as Parameters<typeof workflowStart>[0]),
+		// Mirrors the guard in index.ts's execute(): without it, action=start
+		// with no goal reaches slugify(undefined) in workflows/start.ts and
+		// throws instead of returning a clean refusal.
+		run: (p) => {
+			const params = p as Parameters<typeof workflowStart>[0];
+			const action = params.action ?? "start";
+			if (action === "start" && !params.goal?.trim()) {
+				return Promise.resolve({
+					ok: false,
+					error: "goal is required when action=start",
+				});
+			}
+			return workflowStart({
+				goal: params.goal ?? "",
+				slug: params.slug,
+				allow_dirty: params.allow_dirty,
+				action,
+			});
+		},
 	},
 	{
 		tool: "dispatch_role",
@@ -90,13 +108,12 @@ export const OPERATIONS: readonly Operation[] = [
 			poll_ms: Type.Optional(Type.Number()),
 			budget_ms: Type.Optional(Type.Number()),
 		}),
-		// Pi blocks in one chunk by design: it streams progress and can be
-		// interrupted, so it has no host shell timeout to fit inside.
-		run: (p, hooks) =>
-			workflowWait(
-				{ budget_ms: Number.MAX_SAFE_INTEGER, ...(p as WaitParams) },
-				hooks,
-			),
+		// The Pi driver bypasses this handler entirely — Task 5 special-cases
+		// workflow_wait and calls workflowWait directly with its streaming
+		// hooks, supplying its own budget. This run is reached only by the
+		// CLI, which must not block forever, so params pass through unchanged
+		// and DEFAULT_BUDGET_MS (300s) applies when budget_ms is absent.
+		run: (p, hooks) => workflowWait(p as WaitParams, hooks),
 	},
 	{
 		tool: "workflow_commit_phase",
