@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { parseFlags, parseNumFlag } from "./parse.ts";
-import { EXIT_USAGE, exitCodeFor, renderHuman, renderJson } from "./format.ts";
+import { EXIT_ERROR, EXIT_USAGE, exitCodeFor, renderHuman, renderJson } from "./format.ts";
+import { confirmHuman, prodHumanGateDeps } from "./human-gate.ts";
 import { OPERATIONS, findByVerb } from "../registry.ts";
 import { DISPATCH_KINDS } from "../domain/state-machine.ts";
 import type { ToolResult } from "../result.ts";
@@ -63,6 +64,15 @@ export async function main(argv: string[]): Promise<number> {
 			json,
 		);
 		return EXIT_USAGE;
+	}
+
+	if (op.humanOnly) {
+		const gate = String(built.params.gate ?? "");
+		const confirmed = await confirmHuman(gate, prodHumanGateDeps, flags.has("i-am-human"));
+		if (!confirmed.ok) {
+			console.error(`ERROR: ${confirmed.reason}`);
+			return EXIT_ERROR;
+		}
 	}
 
 	const result = await op.run(built.params);

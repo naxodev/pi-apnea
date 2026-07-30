@@ -51,7 +51,7 @@ export const OPERATIONS: readonly Operation[] = [
 	{
 		tool: null,
 		verb: "setup",
-		usage: "[--project] [--force]",
+		usage: "[--project] [--force] [--agents-md]",
 		summary: "Write global profiles and optional project role bindings.",
 		params: Type.Object({
 			project: Type.Optional(Type.Boolean()),
@@ -126,7 +126,7 @@ export const OPERATIONS: readonly Operation[] = [
 	{
 		tool: "workflow_wait",
 		verb: "wait",
-		usage: "[--timeout=<ms>]",
+		usage: "[--poll=<ms>] [--budget=<ms>]",
 		summary: "Wait for the pending artifact's front-matter to be complete.",
 		guidance:
 			"Blocks until the artifact is ready or the role times out. Exit is non-fatal when the call's budget is spent but the role still has time — call again.",
@@ -173,7 +173,7 @@ export const OPERATIONS: readonly Operation[] = [
 	{
 		tool: null,
 		verb: "reset-rounds",
-		usage: "<gate>",
+		usage: "<gate> [--i-am-human]",
 		summary: "Reset the rework counter for a gate. Human only.",
 		humanOnly: true,
 		params: Type.Object({
