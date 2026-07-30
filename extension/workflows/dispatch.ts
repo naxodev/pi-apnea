@@ -36,19 +36,6 @@ export type DispatchParams = {
 	rework?: boolean;
 };
 
-/**
- * Timeout budget key per kind — the step the kind runs *during*, which is why
- * these are step names rather than kind names.
- */
-const TIMEOUT_KEY_BY_KIND: Record<DispatchKind, string> = {
-	plan: "planning",
-	plan_review: "plan_review",
-	phase_package: "phase_packaging",
-	code: "coding",
-	code_review: "code_review",
-	pr_description: "finishing",
-};
-
 function taskBody(opts: {
 	kind: DispatchKind;
 	role: Role;
@@ -195,7 +182,7 @@ export const dispatchWorkflow = (
 		) {
 			return yield* new GateRefused({
 				gate: "round_cap",
-				message: `review round cap ${cfg.review_round_cap} exceeded for ${capKey}. Human: workflow_reset_rounds.`,
+				message: `review round cap ${cfg.review_round_cap} exceeded for ${capKey}. Human: apnea reset-rounds ${capKey} (or /apnea reset-rounds ${capKey}).`,
 				details: { gate_key: capKey, cap: cfg.review_round_cap },
 			});
 		}
@@ -420,8 +407,6 @@ export const dispatchWorkflow = (
 		state.pending_extended = false;
 		yield* store.save(state, root);
 
-		const timeoutKey = TIMEOUT_KEY_BY_KIND[params.kind];
-
 		return ok(
 			`dispatched ${params.kind} → ${role} artifact=${artifactRel}`,
 			{
@@ -429,7 +414,7 @@ export const dispatchWorkflow = (
 				artifact: artifactRel,
 				round,
 				step: state.step,
-				timeout_ms: cfg.timeouts_ms[timeoutKey] ?? cfg.timeouts_ms.default,
+				timeout_ms: roleTimeoutMs,
 				launch,
 				next: "workflow_wait",
 			},
