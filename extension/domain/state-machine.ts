@@ -11,39 +11,13 @@ export const LEGAL_TOOLS: Record<
 		| "workflow_wait"
 		| "workflow_commit_phase"
 		| "workflow_status"
-		| "workflow_reset_rounds"
 	>
 > = {
-	planning: [
-		"dispatch_role",
-		"workflow_wait",
-		"workflow_status",
-		"workflow_reset_rounds",
-	],
-	plan_review: [
-		"dispatch_role",
-		"workflow_wait",
-		"workflow_status",
-		"workflow_reset_rounds",
-	],
-	phase_packaging: [
-		"dispatch_role",
-		"workflow_wait",
-		"workflow_status",
-		"workflow_reset_rounds",
-	],
-	coding: [
-		"dispatch_role",
-		"workflow_wait",
-		"workflow_status",
-		"workflow_reset_rounds",
-	],
-	code_review: [
-		"dispatch_role",
-		"workflow_wait",
-		"workflow_status",
-		"workflow_reset_rounds",
-	],
+	planning: ["dispatch_role", "workflow_wait", "workflow_status"],
+	plan_review: ["dispatch_role", "workflow_wait", "workflow_status"],
+	phase_packaging: ["dispatch_role", "workflow_wait", "workflow_status"],
+	coding: ["dispatch_role", "workflow_wait", "workflow_status"],
+	code_review: ["dispatch_role", "workflow_wait", "workflow_status"],
 	committing: ["workflow_commit_phase", "workflow_status"],
 	finishing: ["dispatch_role", "workflow_wait", "workflow_status"],
 	done: ["workflow_status"],
@@ -52,14 +26,13 @@ export const LEGAL_TOOLS: Record<
 export type ToolName = (typeof LEGAL_TOOLS)[Step][number];
 
 /**
- * Actionable next calls for a step: `LEGAL_TOOLS` minus the read-only snapshot
- * and the human-only cap reset. An agent follows this list literally, so it
- * must contain only calls that move the run forward.
+ * Actionable next calls for a step: `LEGAL_TOOLS` minus the read-only
+ * snapshot. An agent follows this list literally, so it must contain only
+ * calls that move the run forward. The human-only cap reset (`reset-rounds`)
+ * is never a Pi tool at all — see `registry.ts` — so it never appears here.
  */
 export function nextAfter(step: Step): ToolName[] {
-	return LEGAL_TOOLS[step].filter(
-		(t) => t !== "workflow_status" && t !== "workflow_reset_rounds",
-	);
+	return LEGAL_TOOLS[step].filter((t) => t !== "workflow_status");
 }
 
 /**

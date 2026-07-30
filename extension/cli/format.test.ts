@@ -33,6 +33,31 @@ describe("renderHuman", () => {
 	});
 });
 
+describe("renderHuman: unmapped legal_next entries", () => {
+	test("a tool name with no registered CLI verb is dropped, not leaked raw", () => {
+		// Regression guard: LEGAL_TOOLS once advertised `workflow_reset_rounds`,
+		// a tool that was never registered — asCommand's old fallback rendered
+		// it verbatim as if it were a runnable command. A bare, unmapped,
+		// tool-name-shaped string must never reach rendered output again.
+		const out = renderHuman({
+			ok: true,
+			message: "run started",
+			legal_next: ["workflow_reset_rounds"],
+		});
+		expect(out).not.toContain("workflow_reset_rounds");
+		expect(out).not.toContain("next:");
+	});
+
+	test("a human-readable hint (contains whitespace) still renders", () => {
+		const out = renderHuman({
+			ok: false,
+			error: "kind not allowed",
+			legal_next: ["dispatch_role with allowed kind"],
+		});
+		expect(out).toContain("dispatch_role with allowed kind");
+	});
+});
+
 describe("renderJson", () => {
 	test("preserves canonical tool names for machine callers", () => {
 		// JSON consumers key off stable identifiers; verb rendering is a
