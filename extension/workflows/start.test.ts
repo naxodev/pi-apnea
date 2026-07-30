@@ -407,6 +407,16 @@ describe("start/status adapters (temp dir)", () => {
 		if (st.ok) expect(st.data?.has_state).toBe(false);
 	});
 
+	// `apnea status` is the likely first command a cold agent runs on a fresh
+	// checkout. Without a legal_next hint here, the self-describing promise
+	// breaks exactly at cold start — the agent gets no pointer to workflow_start.
+	test("status with no state → legal_next points at workflow_start", async () => {
+		const d = gitRepo();
+		process.chdir(d);
+		const st = await workflowStatus();
+		expect(st.legal_next).toEqual(["workflow_start"]);
+	});
+
 	test("reset-rounds on missing state → ok:false no-run-state", async () => {
 		const d = gitRepo();
 		process.chdir(d);

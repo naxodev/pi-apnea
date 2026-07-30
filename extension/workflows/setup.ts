@@ -19,6 +19,12 @@ export type SetupParams = {
 	project?: boolean;
 	/** Overwrite existing global profiles (default: merge, keep existing profile keys) */
 	force?: boolean;
+	/**
+	 * Declared in the registry's `setup` params schema and accepted by both
+	 * argument surfaces (`apnea setup --agents-md`, `/apnea setup --agents-md`)
+	 * for forward compatibility; not yet read here.
+	 */
+	agents_md?: boolean;
 };
 
 export type SetupDeps = {

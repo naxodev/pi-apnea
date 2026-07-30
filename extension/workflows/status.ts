@@ -19,7 +19,7 @@ export const statusWorkflow = (
 		const vcsSvc = yield* Vcs;
 		const state = yield* store.load(root);
 		if (!state) {
-			return ok("no active run", { has_state: false });
+			return ok("no active run", { has_state: false }, ["workflow_start"]);
 		}
 
 		// Config summary never fails the tool
