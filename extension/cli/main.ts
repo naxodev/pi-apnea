@@ -17,6 +17,9 @@ function usage(): string {
 		),
 		"  resume | abandon   actions on an existing run",
 		"",
+		"apnea reset-rounds also accepts [--i-am-human] (CLI only — skips the TTY",
+		"confirmation prompt that only this surface has; see README.md).",
+		"",
 		`dispatch kinds: ${DISPATCH_KINDS.join(" | ")}`,
 		"",
 		"Exit codes: 0 ok · 1 refused/error · 2 usage · 3 still waiting (call again)",
@@ -70,7 +73,8 @@ export async function main(argv: string[]): Promise<number> {
 		const gate = String(built.params.gate ?? "");
 		const confirmed = await confirmHuman(gate, prodHumanGateDeps, flags.has("i-am-human"));
 		if (!confirmed.ok) {
-			console.error(`ERROR: ${confirmed.reason}`);
+			const result: ToolResult = { ok: false, error: confirmed.reason };
+			console.error(json ? renderJson(result) : renderHuman(result));
 			return EXIT_ERROR;
 		}
 	}

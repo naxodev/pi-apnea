@@ -7,7 +7,7 @@ import { workflowResetRounds, workflowStatus } from "./adapters/status.ts";
 import { workflowWait } from "./adapters/wait.ts";
 import { DISPATCH_KINDS } from "./domain/state-machine.ts";
 import type { ToolResult } from "./result.ts";
-import type { WaitHooks, WaitParams } from "./workflows/wait.ts";
+import type { WaitParams } from "./workflows/wait.ts";
 
 export type Operation = {
 	/** Pi tool name, or null when the operation is not model-facing. */
@@ -29,10 +29,7 @@ export type Operation = {
 	readonly params: TSchema;
 	/** Gated behind the TTY check in the CLI; never registered as a tool. */
 	readonly humanOnly?: true;
-	readonly run: (
-		params: Record<string, unknown>,
-		hooks?: WaitHooks,
-	) => Promise<ToolResult>;
+	readonly run: (params: Record<string, unknown>) => Promise<ToolResult>;
 };
 
 // Sourced from domain/state-machine.ts (not hardcoded here) so a new kind
@@ -126,7 +123,7 @@ export const OPERATIONS: readonly Operation[] = [
 	{
 		tool: "workflow_wait",
 		verb: "wait",
-		usage: "[--poll=<ms>] [--budget=<ms>]",
+		usage: "[--poll=<ms>] [--budget=<ms>|--timeout=<ms>]",
 		summary: "Wait for the pending artifact's front-matter to be complete.",
 		guidance:
 			"Blocks until the artifact is ready or the role times out. Exit is non-fatal when the call's budget is spent but the role still has time — call again.",
@@ -137,11 +134,12 @@ export const OPERATIONS: readonly Operation[] = [
 			budget_ms: Type.Optional(Type.Number()),
 		}),
 		// The Pi driver bypasses this handler entirely — Task 5 special-cases
-		// workflow_wait and calls workflowWait directly with its streaming
-		// hooks, supplying its own budget. This run is reached only by the
-		// CLI, which must not block forever, so params pass through unchanged
-		// and DEFAULT_BUDGET_MS (300s) applies when budget_ms is absent.
-		run: (p, hooks) => workflowWait(p as WaitParams, hooks),
+		// workflow_wait and calls workflowWait directly with its own streaming
+		// hooks, supplying its own budget (see extension/index.ts). This run is
+		// reached only by the CLI, which must not block forever, so params pass
+		// through unchanged and DEFAULT_BUDGET_MS (300s) applies when budget_ms
+		// is absent. No hooks parameter here — nothing calls op.run with one.
+		run: (p) => workflowWait(p as WaitParams),
 	},
 	{
 		tool: "workflow_commit_phase",
@@ -173,7 +171,12 @@ export const OPERATIONS: readonly Operation[] = [
 	{
 		tool: null,
 		verb: "reset-rounds",
-		usage: "<gate> [--i-am-human]",
+		// `--i-am-human` is deliberately not listed here: it's a CLI-only TTY
+		// bypass (the slash handler doesn't accept it — see main.ts's own usage()
+		// and README.md), and this string feeds both `/apnea help` and the CLI's
+		// per-verb line, so listing it here would advertise it on the slash
+		// command too.
+		usage: "<gate>",
 		summary: "Reset the rework counter for a gate. Human only.",
 		humanOnly: true,
 		params: Type.Object({
