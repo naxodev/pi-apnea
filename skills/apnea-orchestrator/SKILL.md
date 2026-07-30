@@ -22,8 +22,17 @@ Immediately after a successful start:
 
 ## When tools exist
 
-Use only: `workflow_start`, `dispatch_role`, `workflow_wait`, `workflow_commit_phase`, `workflow_status`.  
-Never: `workflow_reset_rounds` (human), never edit `.apnea/state.json` by hand, never implement product code.
+Use only these; the CLI column is the same operation for a harness with no Apnea Pi plugin — see [ADR 0009](../../docs/adr/0009-cli-driver-split.md):
+
+| Tool | CLI |
+|------|-----|
+| `workflow_start` | `apnea start <goal>` |
+| `dispatch_role` | `apnea dispatch <kind>` |
+| `workflow_wait` | `apnea wait` |
+| `workflow_commit_phase` | `apnea commit` |
+| `workflow_status` | `apnea status` |
+
+Never: `apnea reset-rounds` / `/apnea reset-rounds` (human only — it is not a model-facing tool at all, see [ADR 0002](../../docs/adr/0002-orchestrator-authority.md)), never edit `.apnea/state.json` by hand, never implement product code.
 
 ### Loop (do not skip steps)
 
@@ -43,9 +52,14 @@ start
 
 Follow `briefs/orchestrator.md` and `docs/protocol/overview.md`.
 
-## Paper / pre-tool mode
+## When Pi tools are absent
 
-If tools are missing, you may still help the **human** orchestrate:
+Run the `apnea` CLI instead — same loop, same refusals (see the table above). Any shell that
+can run `apnea` can hold the orchestrator seat.
+
+## Paper mode (no shell at all)
+
+If you cannot run shell commands either, you may still help the **human** orchestrate:
 
 - Propose exact task file contents and pointer messages
 - Name exact artifact paths for the current step

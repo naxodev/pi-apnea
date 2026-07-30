@@ -49,6 +49,10 @@ export const RunStateSchema = Schema.Struct({
 	pending_pane_label: Schema.optionalKey(Schema.NullOr(Schema.String)),
 	/** Mirrored in `schemas/state.schema.json`; drift is caught by schema.test.ts. */
 	pending_floating_exit: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	pending_started_at: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	pending_deadline_ms: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	pending_nudged_at: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	pending_extended: Schema.optionalKey(Schema.Boolean),
 	role_panes: Schema.optionalKey(
 		Schema.Record(Schema.String, PaneRefSchema),
 	),
@@ -91,6 +95,10 @@ export function decodeRunState(
 		pending_pane_id: d.pending_pane_id ?? null,
 		pending_pane_label: d.pending_pane_label ?? null,
 		pending_floating_exit: d.pending_floating_exit ?? null,
+		pending_started_at: d.pending_started_at ?? null,
+		pending_deadline_ms: d.pending_deadline_ms ?? null,
+		pending_nudged_at: d.pending_nudged_at ?? null,
+		pending_extended: d.pending_extended ?? false,
 		role_panes: { ...(d.role_panes ?? {}) },
 		package_root: d.package_root,
 		reviewer_tree_fingerprint: d.reviewer_tree_fingerprint,

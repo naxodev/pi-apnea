@@ -7,7 +7,11 @@ import {
 } from "../domain/frontmatter.ts";
 import { looksLikeShellOnly, parseFloatingExit } from "../domain/herdr.ts";
 import { abs, rel } from "../domain/paths.ts";
-import { stepAfterArtifact, toolAllowed } from "../domain/state-machine.ts";
+import {
+	nextAfter,
+	stepAfterArtifact,
+	toolAllowed,
+} from "../domain/state-machine.ts";
 import {
 	ArtifactInvalid,
 	GateRefused,
@@ -26,9 +30,25 @@ import { RunStore } from "../services/run-store.ts";
 import { Vcs } from "../services/vcs.ts";
 
 export type WaitParams = {
-	timeout_ms?: number;
 	poll_ms?: number;
+	/**
+	 * Wall-clock this single call may block for. Defaults to 300s so the call
+	 * fits inside a host agent's shell timeout. The role's real deadline lives
+	 * in `state.pending_deadline_ms` and is unaffected.
+	 */
+	budget_ms?: number;
 };
+
+/** Shell-safe default: under Claude Code's 600s cap with room to spare. */
+export const DEFAULT_BUDGET_MS = 300_000;
+
+/**
+ * A budget below this can't fit the 90s idle-nudge rung (plus the 12s grace
+ * before liveness checks start) inside a single call. `idleSince` stays a
+ * per-call local — see the module doc — so a smaller budget would silently
+ * reset the idle timer every invocation and the role would never be nudged.
+ */
+export const MIN_BUDGET_MS = 120_000;
 
 export type WaitHooks = {
 	signal?: AbortSignal;
@@ -80,7 +100,25 @@ export const waitWorkflow = (
 
 		const cfg = yield* config.load(root);
 
-		const timeout = params.timeout_ms ?? cfg.timeouts_ms.default ?? 900_000;
+		const budget = params.budget_ms ?? DEFAULT_BUDGET_MS;
+		if (budget < MIN_BUDGET_MS) {
+			return yield* new GateRefused({
+				gate: "budget_floor",
+				message: `budget_ms must be >= ${MIN_BUDGET_MS} (need room for the 90s idle nudge + 12s grace); got ${budget}`,
+			});
+		}
+		const startedMs = yield* Clock.currentTimeMillis;
+
+		// Legacy state (dispatched before the clock existed) starts its budget now.
+		const dispatchedAt = state.pending_started_at ?? startedMs;
+		const fallbackTimeout = cfg.timeouts_ms.default ?? 900_000;
+		if (state.pending_deadline_ms == null) {
+			state.pending_started_at = dispatchedAt;
+			state.pending_deadline_ms = dispatchedAt + fallbackTimeout;
+			yield* store.save(state, root);
+		}
+		const timeout = state.pending_deadline_ms - dispatchedAt;
+		const budgetEnd = startedMs + budget;
 		const poll = params.poll_ms ?? 2000;
 		const artifactAbs = abs(pendingArtifact, root);
 		const kindResult = inferKind(pendingArtifact);
@@ -176,23 +214,25 @@ export const waitWorkflow = (
 				state.pending_pane_id = null;
 				state.pending_pane_label = null;
 				state.pending_floating_exit = null;
+				state.pending_started_at = null;
+				state.pending_deadline_ms = null;
+				state.pending_nudged_at = null;
+				state.pending_extended = false;
 				state.reviewer_tree_fingerprint = null;
 				state.last_error = null;
 				yield* store.save(state, root);
 
-				return ok(`${msg}; step → ${next}`, {
-					artifact: rel(artifactAbs, root),
-					kind,
-					verdict,
-					nits: fm.nits ?? null,
-					step: next,
-					legal_next:
-						next === "committing"
-							? ["workflow_commit_phase"]
-							: next === "done"
-								? ["workflow_status"]
-								: ["dispatch_role", "workflow_status"],
-				});
+				return ok(
+					`${msg}; step → ${next}`,
+					{
+						artifact: rel(artifactAbs, root),
+						kind,
+						verdict,
+						nits: fm.nits ?? null,
+						step: next,
+					},
+					nextAfter(next),
+				);
 			});
 
 		const graceMs = 12_000;
@@ -204,8 +244,8 @@ export const waitWorkflow = (
 		let shellOnlyPolls = 0;
 		let idleSince: number | null = null;
 		let floatingExitSeenAt: number | null = null;
-		let nudged = false;
-		let extendedOnce = false;
+		let nudged = state.pending_nudged_at != null;
+		let extendedOnce = state.pending_extended;
 		let finalNudgeGrace = false;
 
 		const nudgePrompt =
@@ -221,6 +261,8 @@ export const waitWorkflow = (
 					return;
 				}
 				nudged = true;
+				state.pending_nudged_at = yield* Clock.currentTimeMillis;
+				yield* store.save(state, root);
 				const outcome = yield* Effect.option(
 					herdr.paneRun(state.pending_pane_id, nudgePrompt),
 				);
@@ -246,13 +288,11 @@ export const waitWorkflow = (
 			],
 		});
 
-		const startedMs = yield* Clock.currentTimeMillis;
-		let deadline = startedMs + timeout;
-
 		const loop: Effect.Effect<ToolResult, AppError> = Effect.gen(
 			function* () {
 				while (true) {
 					const now = yield* Clock.currentTimeMillis;
+					const deadline = state.pending_deadline_ms ?? startedMs + timeout;
 
 					const fm = yield* readArtifact();
 					if (isCompleteArtifact(fm, { requireVerdict })) {
@@ -304,7 +344,7 @@ export const waitWorkflow = (
 						const info = yield* herdr.paneGet(state.pending_pane_id);
 						if (!info.ok) {
 							lastStatus = "pane_missing";
-							if (now - startedMs > graceMs) {
+							if (now - dispatchedAt > graceMs) {
 								state.last_error = `role pane missing while waiting for ${pendingArtifact}`;
 								yield* store.save(state, root);
 								return yield* new HerdrError({
@@ -322,7 +362,7 @@ export const waitWorkflow = (
 								if (idleSince == null) idleSince = now;
 								else if (
 									now - idleSince >= idleNudgeAfterMs &&
-									now - startedMs > graceMs
+									now - dispatchedAt > graceMs
 								) {
 									yield* tryNudge("idle stall");
 								}
@@ -330,7 +370,7 @@ export const waitWorkflow = (
 								idleSince = null;
 							}
 
-							if (now - startedMs > graceMs) {
+							if (now - dispatchedAt > graceMs) {
 								const names = yield* herdr.paneForegroundNames(
 									state.pending_pane_id,
 								);
@@ -358,6 +398,22 @@ export const waitWorkflow = (
 						}
 					}
 
+					if (now >= budgetEnd && now < deadline) {
+						const elapsed = Math.round((now - dispatchedAt) / 1000);
+						const remaining = Math.round((deadline - now) / 1000);
+						return ok(
+							`still waiting for ${pendingArtifact} (${elapsed}s elapsed, ${remaining}s before timeout)`,
+							{
+								pending: true,
+								artifact: pendingArtifact,
+								elapsed_s: elapsed,
+								remaining_s: remaining,
+								last_agent_status: lastStatus,
+							},
+							["workflow_wait"],
+						);
+					}
+
 					if (now >= deadline) {
 						// Still working: extend once.
 						if (
@@ -366,7 +422,9 @@ export const waitWorkflow = (
 						) {
 							extendedOnce = true;
 							const extra = Math.max(Math.floor(timeout * 0.5), 120_000);
-							deadline = now + extra;
+							state.pending_extended = true;
+							state.pending_deadline_ms = now + extra;
+							yield* store.save(state, root);
 							hooks.onUpdate?.({
 								content: [
 									{
@@ -379,6 +437,12 @@ export const waitWorkflow = (
 						}
 
 						// Idle and never nudged: final nudge + short grace.
+						// `!nudged` is what makes this rung cross-invocation-safe: `nudged`
+						// seeds from `state.pending_nudged_at` (line ~247), which `tryNudge`
+						// persists to disk, so a nudge sent in a *previous* `wait` call still
+						// suppresses this rung here. `!finalNudgeGrace` alone would not —
+						// it's a fresh per-call local and would re-fire every call. Keep both
+						// guards in sync if either changes.
 						if (
 							!finalNudgeGrace &&
 							!nudged &&
@@ -387,14 +451,15 @@ export const waitWorkflow = (
 						) {
 							finalNudgeGrace = true;
 							yield* tryNudge("timeout idle");
-							deadline = now + 180_000;
+							state.pending_deadline_ms = now + 180_000;
+							yield* store.save(state, root);
 							continue;
 						}
 
 						break;
 					}
 
-					const elapsed = Math.round((now - startedMs) / 1000);
+					const elapsed = Math.round((now - dispatchedAt) / 1000);
 					hooks.onUpdate?.({
 						content: [
 							{

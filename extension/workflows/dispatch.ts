@@ -14,9 +14,11 @@ import { getRound, roundKey, setRound } from "../domain/rounds.ts";
 import {
 	allowedKinds,
 	expectedRole,
+	nextAfter,
 	toolAllowed,
 	type DispatchKind,
 } from "../domain/state-machine.ts";
+import { timeoutMsForKind } from "../domain/timeouts.ts";
 import {
 	ConfigError,
 	GateRefused,
@@ -38,19 +40,6 @@ export type DispatchParams = {
 	task_markdown?: string;
 	/** Increment round after CHANGES_REQUIRED (protocol: only then). */
 	rework?: boolean;
-};
-
-/**
- * Timeout budget key per kind — the step the kind runs *during*, which is why
- * these are step names rather than kind names.
- */
-const TIMEOUT_KEY_BY_KIND: Record<DispatchKind, string> = {
-	plan: "planning",
-	plan_review: "plan_review",
-	phase_package: "phase_packaging",
-	code: "coding",
-	code_review: "code_review",
-	pr_description: "finishing",
 };
 
 function taskBody(opts: {
@@ -181,6 +170,8 @@ export const dispatchWorkflow = (
 
 		const role = expectedRole(params.kind);
 		const cfg = yield* config.load(root);
+		const dispatchedAt = yield* Clock.currentTimeMillis;
+		const roleTimeoutMs = timeoutMsForKind(params.kind, cfg.timeouts_ms);
 
 		// --- Round numbers (increment ONLY on rework after CHANGES_REQUIRED) ---
 		let round = 1;
@@ -221,7 +212,7 @@ export const dispatchWorkflow = (
 		) {
 			return yield* new GateRefused({
 				gate: "round_cap",
-				message: `review round cap ${cfg.review_round_cap} exceeded for ${capKey}. Human: workflow_reset_rounds.`,
+				message: `review round cap ${cfg.review_round_cap} exceeded for ${capKey}. Human: apnea reset-rounds ${capKey} (or /apnea reset-rounds ${capKey}).`,
 				details: { gate_key: capKey, cap: cfg.review_round_cap },
 			});
 		}
@@ -340,6 +331,10 @@ export const dispatchWorkflow = (
 			state.pending_pane_id = null;
 			state.pending_pane_label = null;
 			state.pending_floating_exit = null;
+			state.pending_started_at = dispatchedAt;
+			state.pending_deadline_ms = dispatchedAt + roleTimeoutMs;
+			state.pending_nudged_at = null;
+			state.pending_extended = false;
 			yield* store.save(state, root);
 			return ok(
 				`task written (no Herdr). Launch ${role} yourself; then workflow_wait.`,
@@ -351,6 +346,7 @@ export const dispatchWorkflow = (
 					launch,
 					next: "workflow_wait",
 				},
+				nextAfter(state.step),
 			);
 		}
 
@@ -448,17 +444,23 @@ export const dispatchWorkflow = (
 
 		state.pending_artifact = artifactRel;
 		state.pending_role = role;
+		state.pending_started_at = dispatchedAt;
+		state.pending_deadline_ms = dispatchedAt + roleTimeoutMs;
+		state.pending_nudged_at = null;
+		state.pending_extended = false;
 		yield* store.save(state, root);
 
-		const timeoutKey = TIMEOUT_KEY_BY_KIND[params.kind];
-
-		return ok(`dispatched ${params.kind} → ${role} artifact=${artifactRel}`, {
-			task: taskRef.task,
-			artifact: artifactRel,
-			round,
-			step: state.step,
-			timeout_ms: cfg.timeouts_ms[timeoutKey] ?? cfg.timeouts_ms.default,
-			launch,
-			next: "workflow_wait",
-		});
+		return ok(
+			`dispatched ${params.kind} → ${role} artifact=${artifactRel}`,
+			{
+				task: taskRef.task,
+				artifact: artifactRel,
+				round,
+				step: state.step,
+				timeout_ms: roleTimeoutMs,
+				launch,
+				next: "workflow_wait",
+			},
+			nextAfter(state.step),
+		);
 	});

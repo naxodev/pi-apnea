@@ -2,7 +2,7 @@ import * as path from "node:path";
 import { Effect, Result } from "effect";
 import { asVerdict, parseFrontMatter } from "../domain/frontmatter.ts";
 import { abs, phaseDir, rel } from "../domain/paths.ts";
-import { toolAllowed } from "../domain/state-machine.ts";
+import { nextAfter, toolAllowed } from "../domain/state-machine.ts";
 import { extractVerifyCommands } from "../domain/verify-commands.ts";
 import {
 	ArtifactInvalid,
@@ -136,14 +136,18 @@ export const commitWorkflow = (
 		state.last_error = null;
 		yield* store.save(state, root);
 
-		return ok(`committed phase; step → ${state.step}`, {
-			vcs_detail: detail,
-			verify_log: rel(vlog, root),
-			step: state.step,
-			phase_index: state.phase_index,
-			next:
-				state.step === "finishing"
-					? ["dispatch_role kind=pr_description"]
-					: ["dispatch_role kind=phase_package"],
-		});
+		return ok(
+			`committed phase; step → ${state.step}`,
+			{
+				vcs_detail: detail,
+				verify_log: rel(vlog, root),
+				step: state.step,
+				phase_index: state.phase_index,
+				next:
+					state.step === "finishing"
+						? ["dispatch_role kind=pr_description"]
+						: ["dispatch_role kind=phase_package"],
+			},
+			nextAfter(state.step),
+		);
 	});

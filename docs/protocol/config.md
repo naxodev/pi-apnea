@@ -48,6 +48,18 @@ Unknown keys and unimplemented values (`isolation: "worktree"`) **hard-error** a
 }
 ```
 
+## Role timeout vs. `--timeout`
+
+`timeouts_ms` above sets each role's real deadline. `dispatch_role` (`apnea dispatch`) reads it
+and stamps the deadline into `state.json` at dispatch time, so it survives across process
+restarts and repeated `wait` calls.
+
+`apnea wait --timeout=<ms>` and `/apnea wait --timeout=<ms>` are a different knob: `--timeout`
+is an alias for `--budget`, and both bound how long **that one call** blocks before returning —
+not the role's deadline. There is a 120000ms floor. When the call's budget runs out before the
+role's deadline, it exits `3` ("still waiting") and the caller must call `wait` again; this does
+not extend or shorten the role's timeout.
+
 ## Pane style
 
 `pane_style` controls how role dispatches appear in Herdr:

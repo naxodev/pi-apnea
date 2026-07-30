@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect";
-import { describe, expect } from "bun:test";
+import { TestClock } from "effect/testing";
+import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
 import { statePath } from "../domain/paths.ts";
 import type { ApneaConfig, RunState } from "../domain/types.ts";
@@ -57,6 +58,10 @@ function baseState(overrides: Partial<RunState> = {}): RunState {
 		pending_pane_id: null,
 		pending_pane_label: null,
 		pending_floating_exit: null,
+		pending_started_at: null,
+		pending_deadline_ms: null,
+		pending_nudged_at: null,
+		pending_extended: false,
 		role_panes: {},
 		package_root: "/pkg",
 		reviewer_tree_fingerprint: null,
@@ -89,6 +94,7 @@ function layerOf(
 		cfg,
 		vcs.layer,
 		herdr.layer,
+		TestClock.layer(),
 	);
 	return { layer, vcs: vcs.recorder, herdr: herdr.recorder, fakeFs };
 }
@@ -107,6 +113,49 @@ function assertTaskRef(
 	expect(task as string).toMatch(/^\.apnea\/tasks\/plan-p1-r1-\d+\.md$/);
 	// The whole point: the orchestrator can find the file dispatch orphaned.
 	expect(fakeFs.files.has(path.join(ROOT, task as string))).toBe(true);
+}
+
+/** Runs dispatchWorkflow against a TestClock pinned to nowMs. */
+async function runDispatch(
+	params: Parameters<typeof dispatchWorkflow>[0],
+	opts: {
+		nowMs: number;
+		cfg?: ApneaConfig;
+		herdr?: Parameters<typeof fakeHerdrLayer>[0];
+	},
+): Promise<RunState> {
+	const fsFake = seedFs(baseState({ step: "planning" }));
+	const { layer, fakeFs } = layerOf(fsFake, {
+		herdr: opts.herdr ?? {
+			enabled: true,
+			interactive: {
+				pane_id: "pane-1",
+				label: "apnea:planner:fake",
+				reused: false,
+				prompt_accepted: true,
+				prompt_attempts: 1,
+				last_status: "working",
+			},
+		},
+		cfg: opts.cfg ?? {
+			profiles: { pi: { cmd_interactive: ["pi"] } },
+			roles: {
+				planner: { profile: "pi" },
+				reviewer: { profile: "pi" },
+				coder: { profile: "pi" },
+			},
+			review_round_cap: 3,
+			timeouts_ms: { planning: 1_500_000 },
+			pane_style: "regular",
+		},
+	});
+	await Effect.runPromise(
+		Effect.gen(function* () {
+			yield* TestClock.setTime(opts.nowMs);
+			yield* dispatchWorkflow(params, ROOT);
+		}).pipe(Effect.provide(layer)),
+	);
+	return savedState(fakeFs);
 }
 
 describe("dispatchWorkflow (fake layers)", () => {
@@ -503,4 +552,31 @@ describe("dispatchWorkflow (fake layers)", () => {
 			}).pipe(Effect.provide(layer));
 		},
 	);
+
+	test("dispatch stamps the clock so a later wait can resume the budget", async () => {
+		// Without a persisted start and deadline, every fresh `apnea wait`
+		// process would restart the timeout and a hung role would never fail.
+		const now = 1_700_000_000_000;
+		const state = await runDispatch({ kind: "plan" }, { nowMs: now });
+		expect(state.pending_started_at).toBe(now);
+		expect(state.pending_deadline_ms).toBe(now + 1_500_000);
+		expect(state.pending_nudged_at).toBeNull();
+		expect(state.pending_extended).toBe(false);
+	});
+
+	test("no-Herdr dispatch also stamps the clock (manual launch still owes wait a deadline)", async () => {
+		// This branch tells the operator to launch the role by hand and then
+		// call workflow_wait. It offers the same workflow_wait contract as the
+		// Herdr-driven branches, so it must not be the one path left with a
+		// null deadline that silently falls back to the un-timed default.
+		const now = 1_700_000_000_000;
+		const state = await runDispatch(
+			{ kind: "plan" },
+			{ nowMs: now, herdr: { enabled: false } },
+		);
+		expect(state.pending_started_at).toBe(now);
+		expect(state.pending_deadline_ms).toBe(now + 1_500_000);
+		expect(state.pending_nudged_at).toBeNull();
+		expect(state.pending_extended).toBe(false);
+	});
 });

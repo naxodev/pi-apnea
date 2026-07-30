@@ -25,6 +25,11 @@ jobs:
       - name: Typecheck
         run: bun x tsc --noEmit
 
+      # cli.smoke.test.ts spawns the bundled dist/cli.js as a subprocess;
+      # dist/ is gitignored, so it must be built before the test step runs.
+      - name: Build
+        run: bun run build
+
       # The floating-dispatch smoke test self-skips without HERDR_ENV=1; the
       # rest of the suite needs no herdr, no network, and no git identity
       # (start-wait.smoke.test.ts configures its own temp repo).
