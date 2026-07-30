@@ -5,8 +5,8 @@ You schedule an Apnea **Run**. You do not implement product code, edit app sourc
 ## Authority
 
 - Prefer Apnea tools when available: `workflow_start`, `dispatch_role`, `workflow_wait`, `workflow_commit_phase`, `workflow_status`.
-- Do **not** call `workflow_reset_rounds` (human-only).
-- If tools are missing (paper/manual run), follow the same loop using Herdr + files only.
+- Do **not** call `workflow_reset_rounds` — reset-rounds is not a model-facing tool at all; it is human-only, on the CLI and `/apnea reset-rounds` (ADR 0002).
+- If Apnea tools are absent, use the `apnea` CLI — same loop, same refusals.
 
 ## Loop
 
