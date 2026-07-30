@@ -14,6 +14,14 @@ export type Operation = {
 	readonly tool: string | null;
 	/** CLI verb and `/apnea` subcommand. */
 	readonly verb: string;
+	/**
+	 * Argument syntax shown next to the verb in `/apnea help`, e.g.
+	 * `"<goal> [--allow-dirty] [--slug=name]"`. Empty string for verbs that
+	 * take no arguments (e.g. `status`). Required so a new operation can't
+	 * silently omit the human-facing usage the old hand-written helpText()
+	 * used to carry.
+	 */
+	readonly usage: string;
 	/** One line, shared by the tool description and `--help`. */
 	readonly summary: string;
 	/** Extra prose for the model only; omitted from `--help`. */
@@ -34,10 +42,28 @@ const DispatchKind = Type.Union(
 	DISPATCH_KINDS.map((kind) => Type.Literal(kind)),
 );
 
+// Workflow order, not alphabetical or tool-name order: setup is the natural
+// first step for a new checkout, then the start → dispatch → wait → commit
+// loop, then the always-available status, then the human-only escape hatch.
+// `/apnea help` and autocomplete (SUBS) both derive their order from this
+// array, so ordering it once here keeps every rendering in sync for free.
 export const OPERATIONS: readonly Operation[] = [
+	{
+		tool: null,
+		verb: "setup",
+		usage: "[--project] [--force]",
+		summary: "Write global profiles and optional project role bindings.",
+		params: Type.Object({
+			project: Type.Optional(Type.Boolean()),
+			force: Type.Optional(Type.Boolean()),
+			agents_md: Type.Optional(Type.Boolean()),
+		}),
+		run: (p) => apneaSetup(p as Parameters<typeof apneaSetup>[0]),
+	},
 	{
 		tool: "workflow_start",
 		verb: "start",
+		usage: "<goal> [--allow-dirty] [--slug=name]",
 		summary: "Start, resume, or abandon an Apnea run.",
 		guidance:
 			"Start only writes state (step=planning) — it does NOT launch roles. After start succeeds you MUST immediately call dispatch_role kind=plan then workflow_wait. Resume never auto-dispatches. Refuses if state exists or tree dirty (unless allow_dirty).",
@@ -80,6 +106,7 @@ export const OPERATIONS: readonly Operation[] = [
 	{
 		tool: "dispatch_role",
 		verb: "dispatch",
+		usage: "<kind> [--rework]",
 		summary: "Write the task file and launch a role in a Herdr pane.",
 		guidance:
 			"One outstanding dispatch at a time. Pass rework=true only after CHANGES_REQUIRED on the same gate — that is what increments the round counter.",
@@ -99,6 +126,7 @@ export const OPERATIONS: readonly Operation[] = [
 	{
 		tool: "workflow_wait",
 		verb: "wait",
+		usage: "[--timeout=<ms>]",
 		summary: "Wait for the pending artifact's front-matter to be complete.",
 		guidance:
 			"Blocks until the artifact is ready or the role times out. Exit is non-fatal when the call's budget is spent but the role still has time — call again.",
@@ -118,6 +146,7 @@ export const OPERATIONS: readonly Operation[] = [
 	{
 		tool: "workflow_commit_phase",
 		verb: "commit",
+		usage: "[--done] [message]",
 		summary: "Verify and commit the current phase, then advance.",
 		guidance:
 			"Requires an APPROVED code review. Runs the phase package's verify commands and refuses on non-zero exit. Pass no_remaining_phases=true to move to the PR description instead of the next phase.",
@@ -135,6 +164,7 @@ export const OPERATIONS: readonly Operation[] = [
 	{
 		tool: "workflow_status",
 		verb: "status",
+		usage: "",
 		summary: "Read-only snapshot of run state and legal next calls.",
 		guidance: "Never mutates. Safe to call at any point.",
 		params: Type.Object({}),
@@ -143,6 +173,7 @@ export const OPERATIONS: readonly Operation[] = [
 	{
 		tool: null,
 		verb: "reset-rounds",
+		usage: "<gate>",
 		summary: "Reset the rework counter for a gate. Human only.",
 		humanOnly: true,
 		params: Type.Object({
@@ -152,17 +183,6 @@ export const OPERATIONS: readonly Operation[] = [
 		}),
 		run: (p) =>
 			workflowResetRounds(p as Parameters<typeof workflowResetRounds>[0]),
-	},
-	{
-		tool: null,
-		verb: "setup",
-		summary: "Write global profiles and optional project role bindings.",
-		params: Type.Object({
-			project: Type.Optional(Type.Boolean()),
-			force: Type.Optional(Type.Boolean()),
-			agents_md: Type.Optional(Type.Boolean()),
-		}),
-		run: (p) => apneaSetup(p as Parameters<typeof apneaSetup>[0]),
 	},
 ];
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { OPERATIONS } from "../registry.ts";
-import { parseFlags, SUBS } from "./commands.ts";
+import { parseFlags } from "./commands.ts";
 
 describe("parseFlags", () => {
 	test("bare switches land in flags, positionals in rest", () => {
@@ -54,15 +54,11 @@ describe("Pi tool exposure", () => {
 		const tools = OPERATIONS.map((o) => o.tool).filter(Boolean);
 		expect(tools).not.toContain("workflow_reset_rounds");
 	});
-
-	test("every /apnea subcommand has a registry entry", () => {
-		// SUBS used to be a hand-maintained literal that could drift from the
-		// actual dispatch switch below it.
-		for (const sub of SUBS) {
-			if (sub === "help") continue;
-			// resume and abandon are actions on the start operation
-			const verb = sub === "resume" || sub === "abandon" ? "start" : sub;
-			expect(OPERATIONS.some((o) => o.verb === verb)).toBe(true);
-		}
-	});
 });
+
+// The "every /apnea subcommand has a registry entry" check used to live here
+// as `SUBS.every(sub => OPERATIONS.some(...))`. SUBS is *derived from*
+// OPERATIONS.map(o => o.verb), so that assertion was true by construction —
+// it never inspected the switch statement it claimed to guard. It's now
+// commands.dispatch.test.ts, which drives the real handler per registry verb
+// and asserts none of them falls through to the unknown-subcommand branch.

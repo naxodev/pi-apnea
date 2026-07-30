@@ -83,9 +83,13 @@ export function parseFlags(tokens: string[]): {
 }
 
 function helpText(): string {
-	const lines = OPERATIONS.map(
-		(o) => `  /apnea ${o.verb.padEnd(14)} ${o.summary}`,
-	);
+	// verb + usage on one line (what to type), summary indented below (what
+	// it does) — usage is what regressed when helpText() first went generated:
+	// it rendered only the LLM-facing summary and dropped the flag syntax.
+	const lines = OPERATIONS.map((o) => {
+		const invocation = o.usage ? `${o.verb} ${o.usage}` : o.verb;
+		return `  /apnea ${invocation}\n      ${o.summary}`;
+	});
 	return [
 		"Apnea commands (tools remain for the model; you use /apnea):",
 		...lines,

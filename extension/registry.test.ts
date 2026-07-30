@@ -47,6 +47,17 @@ describe("OPERATIONS", () => {
 		}
 	});
 
+	test("every operation declares a usage string", () => {
+		// `usage` is `readonly string` (not optional) on the Operation type so
+		// this is also a compile-time guarantee; this is the runtime backstop
+		// for the human-facing argument syntax helpText() renders — it's what
+		// regressed silently when helpText() first went generated from
+		// `summary` alone and dropped flags like `[--allow-dirty]`.
+		for (const op of OPERATIONS) {
+			expect(typeof op.usage).toBe("string");
+		}
+	});
+
 	test("tool names map back to CLI verbs", () => {
 		// This mapping is what renders `legal_next: ["dispatch_role"]` as
 		// `apnea dispatch` for a CLI caller.
