@@ -7,7 +7,7 @@
  * `reset-rounds` TTY gate, which only behaves correctly when stdin/stdout
  * are real pipes rather than an injected fake.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -16,13 +16,24 @@ const CLI = new URL("../../dist/cli.js", import.meta.url).pathname;
 
 const dirs: string[] = [];
 
+// A missing binary otherwise surfaces as a Bun module-resolution error deep
+// inside the first test, which reads like a broken test rather than a
+// missing build artifact. Fail loudly and up front instead — never skip,
+// since a silent skip would hide the exact regression this suite exists to
+// catch.
+beforeAll(() => {
+	if (!fs.existsSync(CLI)) {
+		throw new Error(`${CLI} not found. Run \`bun run build\` before this suite.`);
+	}
+});
+
 afterEach(() => {
 	for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
 	dirs.length = 0;
 });
 
 /** Fresh temp dir with an initialized git repo. Tracked for cleanup. */
-async function makeTempRepo(): Promise<string> {
+function makeTempRepo(): string {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "apnea-cli-smoke-"));
 	dirs.push(dir);
 	Bun.spawnSync(["git", "init"], { cwd: dir });
@@ -40,7 +51,7 @@ async function run(args: string[], cwd: string) {
 
 describe("apnea CLI", () => {
 	test("status in a repo with no run exits 0", async () => {
-		const dir = await makeTempRepo();
+		const dir = makeTempRepo();
 		const r = await run(["status"], dir);
 		expect(r.code).toBe(0);
 		expect(r.stdout).toContain("no active run");
@@ -49,14 +60,14 @@ describe("apnea CLI", () => {
 	test("unknown command exits 2 with usage", async () => {
 		// Distinct from exit 1: a typo is the caller's bug, not a refused
 		// transition, and an agent should retry differently.
-		const dir = await makeTempRepo();
+		const dir = makeTempRepo();
 		const r = await run(["frobnicate"], dir);
 		expect(r.code).toBe(2);
 		expect(r.stderr).toContain("unknown command");
 	});
 
 	test("--json emits a parseable ToolResult", async () => {
-		const dir = await makeTempRepo();
+		const dir = makeTempRepo();
 		const r = await run(["status", "--json"], dir);
 		const parsed = JSON.parse(r.stdout);
 		expect(parsed.ok).toBe(true);
@@ -65,7 +76,7 @@ describe("apnea CLI", () => {
 	test("reset-rounds refuses without a TTY", async () => {
 		// Bun.spawn gives the child pipes, which is exactly the shape an agent's
 		// shell tool produces. This is the end-to-end proof of the gate.
-		const dir = await makeTempRepo();
+		const dir = makeTempRepo();
 		const r = await run(["reset-rounds", "plan_review"], dir);
 		expect(r.code).toBe(1);
 		expect(r.stderr).toContain("--i-am-human");
