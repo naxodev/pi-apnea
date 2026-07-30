@@ -204,6 +204,24 @@ describe("dispatchWorkflow (fake layers)", () => {
 	);
 
 	itEffect(
+		"no-herdr dispatch's legal_next omits dispatch_role — a dispatch is already outstanding",
+		() => {
+			// `nextAfter(state.step)` would return ["dispatch_role", "workflow_wait"]
+			// at step=planning: it is step-derived and has no idea a dispatch is
+			// in flight. An agent following legal_next literally would fire a
+			// second dispatch that overwrites pending_artifact/pending_role and
+			// orphans the first role's in-flight work.
+			const fsFake = seedFs(baseState({ step: "planning" }));
+			const { layer } = layerOf(fsFake, { herdr: { enabled: false } });
+			return Effect.gen(function* () {
+				const result = yield* dispatchWorkflow({ kind: "plan" }, ROOT);
+				expect(result.ok).toBe(true);
+				expect(result.legal_next).toEqual(["workflow_wait"]);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	itEffect(
 		"rework:true on code bumps phase-01/code_review by one",
 		() => {
 			const fsFake = seedFs(
@@ -322,6 +340,34 @@ describe("dispatchWorkflow (fake layers)", () => {
 					pane_id: "pane-42",
 					label: "apnea:planner:abc",
 				});
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	itEffect(
+		"interactive dispatch's legal_next omits dispatch_role — a dispatch is already outstanding",
+		() => {
+			// Same reasoning as the no-herdr branch's legal_next test above: this
+			// is the OTHER `ok(...)` return site in dispatch.ts, and both must
+			// agree that `workflow_wait` is the only legal next call.
+			const fsFake = seedFs(baseState({ step: "planning" }));
+			const { layer } = layerOf(fsFake, {
+				herdr: {
+					enabled: true,
+					interactive: {
+						pane_id: "pane-42",
+						label: "apnea:planner:abc",
+						reused: false,
+						prompt_accepted: true,
+						prompt_attempts: 1,
+						last_status: "working",
+					},
+				},
+			});
+			return Effect.gen(function* () {
+				const result = yield* dispatchWorkflow({ kind: "plan" }, ROOT);
+				expect(result.ok).toBe(true);
+				expect(result.legal_next).toEqual(["workflow_wait"]);
 			}).pipe(Effect.provide(layer));
 		},
 	);
@@ -578,5 +624,39 @@ describe("dispatchWorkflow (fake layers)", () => {
 		expect(state.pending_deadline_ms).toBe(now + 1_500_000);
 		expect(state.pending_nudged_at).toBeNull();
 		expect(state.pending_extended).toBe(false);
+	});
+
+	test("a slow interactive launch does not eat into the role's deadline (pending_started_at anchors after the launch, not before)", async () => {
+		// `pending_started_at` is the anchor for both the role's own deadline
+		// and wait's 12s liveness grace. Stamping it before
+		// `runInteractivePrompt` charges the harness launch itself against the
+		// role's working time and burns the grace before `apnea wait` polls
+		// even once — one flaky `herdr pane get` then kills a live role.
+		const now = 1_700_000_000_000;
+		const interactiveDelayMs = 30_000; // well over the 12s liveness grace
+		const state = await runDispatch(
+			{ kind: "plan" },
+			{
+				nowMs: now,
+				herdr: {
+					enabled: true,
+					interactive: {
+						pane_id: "pane-1",
+						label: "apnea:planner:fake",
+						reused: false,
+						prompt_accepted: true,
+						prompt_attempts: 1,
+						last_status: "working",
+					},
+					interactiveDelayMs,
+				},
+			},
+		);
+		expect(state.pending_started_at).toBe(now + interactiveDelayMs);
+		// Budget is the role's configured timeout in full — the launch delay
+		// must not be deducted from it.
+		expect(state.pending_deadline_ms! - state.pending_started_at!).toBe(
+			1_500_000,
+		);
 	});
 });

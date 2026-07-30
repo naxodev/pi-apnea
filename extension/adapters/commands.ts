@@ -212,8 +212,8 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 					case "wait": {
 						// `--timeout` and `--budget` are the same knob: how long THIS
 						// call blocks. The role's deadline comes from config, stamped
-						// at dispatch. Mirrors `apnea wait`'s buildParams exactly so
-						// both surfaces accept identical flags.
+						// at dispatch. Same flags as `apnea wait`; only the default
+						// differs, because this surface has no host shell to time out.
 						const poll = parseNumFlag(values, "poll");
 						if (!poll.ok) {
 							ctx.ui.notify(
@@ -240,7 +240,12 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 						}
 						const r = await workflowWait({
 							poll_ms: poll.value,
-							budget_ms: budget.value ?? timeout.value,
+							// Unbounded by default, like the Pi tool in `index.ts`:
+							// `/apnea` runs inside Pi, which has no shell timeout, so
+							// the CLI's 300s chunking default would end the wait with a
+							// green "still waiting" toast and nothing left polling.
+							budget_ms:
+								budget.value ?? timeout.value ?? Number.MAX_SAFE_INTEGER,
 						});
 						notify(ctx, r);
 						return;

@@ -14,7 +14,6 @@ import { getRound, roundKey, setRound } from "../domain/rounds.ts";
 import {
 	allowedKinds,
 	expectedRole,
-	nextAfter,
 	toolAllowed,
 	type DispatchKind,
 } from "../domain/state-machine.ts";
@@ -170,7 +169,6 @@ export const dispatchWorkflow = (
 
 		const role = expectedRole(params.kind);
 		const cfg = yield* config.load(root);
-		const dispatchedAt = yield* Clock.currentTimeMillis;
 		const roleTimeoutMs = timeoutMsForKind(params.kind, cfg.timeouts_ms);
 
 		// --- Round numbers (increment ONLY on rework after CHANGES_REQUIRED) ---
@@ -326,13 +324,17 @@ export const dispatchWorkflow = (
 		};
 
 		if (!(yield* herdr.enabled)) {
+			// Stamped here, not at the top of the workflow: `pending_started_at` is
+			// the anchor for both the role's deadline and wait's liveness grace, so
+			// it must mean "the role has the prompt", not "dispatch began".
+			const launchedAt = yield* Clock.currentTimeMillis;
 			state.pending_artifact = artifactRel;
 			state.pending_role = role;
 			state.pending_pane_id = null;
 			state.pending_pane_label = null;
 			state.pending_floating_exit = null;
-			state.pending_started_at = dispatchedAt;
-			state.pending_deadline_ms = dispatchedAt + roleTimeoutMs;
+			state.pending_started_at = launchedAt;
+			state.pending_deadline_ms = launchedAt + roleTimeoutMs;
 			state.pending_nudged_at = null;
 			state.pending_extended = false;
 			yield* store.save(state, root);
@@ -346,7 +348,11 @@ export const dispatchWorkflow = (
 					launch,
 					next: "workflow_wait",
 				},
-				nextAfter(state.step),
+				// Not `nextAfter(state.step)`: a dispatch is now outstanding, and
+				// `nextAfter` is step-derived so it cannot know that. Advertising
+				// `dispatch_role` here would invite a second dispatch that orphans
+				// this one's in-flight work and resets its deadline.
+				["workflow_wait"],
 			);
 		}
 
@@ -442,10 +448,15 @@ export const dispatchWorkflow = (
 			state.role_panes[role] = { pane_id: r.pane_id, label: r.label };
 		}
 
+		// After the launch, not before it: `runInteractivePrompt` blocks in
+		// `waitAgentReady` (up to 90s) plus prompt-submit retries. Anchoring at
+		// the top of the workflow charged that startup against the role's own
+		// deadline and burned wait's 12s liveness grace before the first poll.
+		const launchedAt = yield* Clock.currentTimeMillis;
 		state.pending_artifact = artifactRel;
 		state.pending_role = role;
-		state.pending_started_at = dispatchedAt;
-		state.pending_deadline_ms = dispatchedAt + roleTimeoutMs;
+		state.pending_started_at = launchedAt;
+		state.pending_deadline_ms = launchedAt + roleTimeoutMs;
 		state.pending_nudged_at = null;
 		state.pending_extended = false;
 		yield* store.save(state, root);
@@ -461,6 +472,8 @@ export const dispatchWorkflow = (
 				launch,
 				next: "workflow_wait",
 			},
-			nextAfter(state.step),
+			// See the no-Herdr return above: one dispatch is outstanding, so
+			// `workflow_wait` is the only call that moves this run forward.
+			["workflow_wait"],
 		);
 	});

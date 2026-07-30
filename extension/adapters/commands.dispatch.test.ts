@@ -34,7 +34,18 @@ mock.module("./status.ts", () => ({
 }));
 mock.module("./commit.ts", () => ({ workflowCommitPhase: stub }));
 mock.module("./dispatch.ts", () => ({ workflowDispatch: stub }));
-mock.module("./wait.ts", () => ({ workflowWait: stub }));
+
+// Unlike `stub`, this records the params `/apnea wait` actually forwards, so
+// a test can assert on what reached `workflowWait` — not just that the case
+// was reached.
+const waitCalls: unknown[] = [];
+mock.module("./wait.ts", () => ({
+	workflowWait: async (params: unknown) => {
+		waitCalls.push(params);
+		return { ok: true as const, message: "stub" };
+	},
+}));
+
 mock.module("./setup.ts", () => ({ apneaSetup: stub }));
 
 const { registerApneaCommands } = await import("./commands.ts");
@@ -105,6 +116,21 @@ describe("registerApneaCommands dispatch routing", () => {
 		const notifications = await runAndCollect(handler, "not-a-real-verb");
 		expect(notifications.some((m) => m.startsWith("Unknown subcommand"))).toBe(
 			true,
+		);
+	});
+
+	test("a bare /apnea wait reaches workflowWait with an unbounded budget_ms — /apnea runs inside Pi, which has no host shell timeout to protect", async () => {
+		// The CLI's 300s DEFAULT_BUDGET_MS exists to fit inside a *shell's*
+		// timeout. `/apnea wait` has no shell — falling through to that default
+		// here used to end the wait after five minutes with a green "still
+		// waiting" toast, after which nothing polled the artifact and the run
+		// silently stalled until a human noticed and retyped the command.
+		waitCalls.length = 0;
+		const handler = captureApneaHandler();
+		await runAndCollect(handler, "wait");
+		expect(waitCalls.length).toBe(1);
+		expect((waitCalls[0] as { budget_ms?: number }).budget_ms).toBe(
+			Number.MAX_SAFE_INTEGER,
 		);
 	});
 });

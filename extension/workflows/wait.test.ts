@@ -4,7 +4,7 @@ import { TestClock } from "effect/testing";
 import type { DispatchKind } from "../domain/state-machine.ts";
 import { statePath } from "../domain/paths.ts";
 import type { ApneaConfig, RunState } from "../domain/types.ts";
-import { toToolResult } from "../errors.ts";
+import { HerdrError, toToolResult } from "../errors.ts";
 import { expectFailure } from "../test/expect-failure.ts";
 import { fakeConfigLayer } from "../test/fake-config.ts";
 import { makeFakeFileSystem } from "../test/fake-file-system.ts";
@@ -433,6 +433,57 @@ describe("waitWorkflow (fake layers + TestClock)", () => {
 					expect(result.message).toContain("artifact ready after nudge");
 				}
 				expect(herdr.paneRuns.length).toBe(1); // exactly one nudge, never repeated
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	itEffect(
+		"a failed nudge still shows the send was attempted, and leaves the rung armed instead of burning it (a dead pane must not permanently disable recovery)",
+		() => {
+			// Before the fix, `state.pending_nudged_at` was persisted BEFORE
+			// `paneRun` ran, so a failing pane still recorded `nudged: true`
+			// forever — both nudge rungs (`nudged` is seeded from
+			// `pending_nudged_at` on every later `wait` call, and the final-nudge
+			// rung is guarded by `!nudged`) were then permanently disabled, and
+			// the run died at the deadline reporting `nudged: true` even though
+			// no prompt was ever delivered.
+			const state = baseState({
+				step: "coding",
+				pending_artifact: ".apnea/artifacts/phase-01/round-1/coder-result.md",
+				pending_role: "coder",
+				pending_pane_id: "pane-1",
+				pending_started_at: 0,
+				pending_deadline_ms: 200_000,
+			});
+			const fsFake = seedFs(state);
+			const { layer, fakeFs, herdr } = layerOf(fsFake, {
+				herdr: {
+					enabled: true,
+					pane: () => ({ ok: true, agent_status: "idle" }),
+					failPaneRun: new HerdrError({ message: "pane run failed" }),
+				},
+			});
+			return Effect.gen(function* () {
+				const fiber = yield* Effect.forkChild(
+					// budget_ms well past both the deadline and the final-nudge grace
+					// so the call keeps running instead of returning an intermediate
+					// "still waiting" `pending: true` when the CLI's chunking budget
+					// is hit first.
+					waitWorkflow({ poll_ms: 1_000, budget_ms: 500_000 }, ROOT),
+				);
+				// Past the 90s idle-stall rung, the 200_000ms deadline, and the
+				// 180_000ms final-nudge grace the timeout-idle rung grants itself —
+				// far enough that the run has genuinely timed out.
+				yield* TestClock.adjust(400_000);
+				const result = yield* Effect.result(Fiber.join(fiber));
+				expectFailure(result, "WaitTimeout");
+				// The send was attempted (at least the idle-stall rung, likely also
+				// the timeout-idle rung) — this is what "attempted but failed" means,
+				// as opposed to "never attempted".
+				expect(herdr.paneRuns.length).toBeGreaterThan(0);
+				// Still armed: a fresh `wait` call must be able to try the rung
+				// again rather than seeing a nudge that was never delivered.
+				expect(savedState(fakeFs).pending_nudged_at).toBeNull();
 			}).pipe(Effect.provide(layer));
 		},
 	);

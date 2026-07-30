@@ -260,23 +260,28 @@ export const waitWorkflow = (
 				if (nudged || !(yield* herdr.enabled) || !state.pending_pane_id) {
 					return;
 				}
-				nudged = true;
-				state.pending_nudged_at = yield* Clock.currentTimeMillis;
-				yield* store.save(state, root);
 				const outcome = yield* Effect.option(
 					herdr.paneRun(state.pending_pane_id, nudgePrompt),
 				);
-				if (Option.isSome(outcome)) {
-					hooks.onUpdate?.({
-						content: [
-							{
-								type: "text",
-								text: `${why} — nudged ${state.pending_role} to write ${pendingArtifact}`,
-							},
-						],
-					});
-				}
+				// Back off either way so a failing pane is not re-prompted every
+				// poll; only a delivered nudge burns the rung.
 				idleSince = yield* Clock.currentTimeMillis;
+				if (Option.isNone(outcome)) return;
+				// Persisted only after the send succeeded. Recording it first made a
+				// failed `paneRun` disable both nudge rungs for the rest of the run
+				// while `WaitTimeout` still reported `nudged: true`. The opposite
+				// failure — a crash between send and save — costs one extra prompt.
+				nudged = true;
+				state.pending_nudged_at = idleSince;
+				yield* store.save(state, root);
+				hooks.onUpdate?.({
+					content: [
+						{
+							type: "text",
+							text: `${why} — nudged ${state.pending_role} to write ${pendingArtifact}`,
+						},
+					],
+				});
 			});
 
 		hooks.onUpdate?.({
