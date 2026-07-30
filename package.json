@@ -5,6 +5,13 @@
   "description": "Multi-role Pi + Herdr workflow: file-backed handoffs, no hidden subagents",
   "license": "MIT",
   "type": "module",
+  "bin": { "apnea": "./dist/cli.js" },
+  "scripts": {
+    "build": "bun build ./extension/cli/main.ts --target=bun --outfile ./dist/cli.js",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run build"
+  },
   "keywords": ["pi-package", "pi", "herdr", "apnea", "workflow"],
   "pi": {
     "skills": ["./skills"],
@@ -21,7 +28,8 @@
     "prompts",
     "examples",
     "extension",
-    "herdr-plugin"
+    "herdr-plugin",
+    "dist"
   ],
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.80.10",
