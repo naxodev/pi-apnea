@@ -10,7 +10,7 @@
     "build": "bun build ./extension/cli/main.ts --target=bun --outfile ./dist/cli.js",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "bun run build"
+    "prepare": "bun run build"
   },
   "keywords": ["pi-package", "pi", "herdr", "apnea", "workflow"],
   "pi": {
