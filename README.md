@@ -61,7 +61,7 @@ Requires `~/.config/apnea/config.json` profiles (see `docs/protocol/config.md` o
 
 Same operations as `workflow_start`, `dispatch_role`, `workflow_wait`, `workflow_commit_phase`, `workflow_status`, plus `read`.
 
-`reset-rounds` is not a Pi tool. It exists only as `apnea reset-rounds` (CLI) and `/apnea reset-rounds` (slash command), and both refuse without a human retyping the gate key — see [ADR 0002](docs/adr/0002-orchestrator-authority.md).
+`reset-rounds` is not a Pi tool. It exists only as `apnea reset-rounds` (CLI) and `/apnea reset-rounds` (slash command). Only the CLI gates it — it refuses unless stdin/stdout are a terminal and a human retypes the gate key (or passes `--i-am-human`). The slash command has no such gate: `/apnea` is already a human at a terminal. See [ADR 0002](docs/adr/0002-orchestrator-authority.md).
 
 ### CLI (`apnea`, no Pi required)
 
