@@ -14,6 +14,7 @@ import { getRound, roundKey, setRound } from "../domain/rounds.ts";
 import {
 	allowedKinds,
 	expectedRole,
+	nextAfter,
 	toolAllowed,
 	type DispatchKind,
 } from "../domain/state-machine.ts";
@@ -327,6 +328,7 @@ export const dispatchWorkflow = (
 					launch,
 					next: "workflow_wait",
 				},
+				nextAfter(state.step),
 			);
 		}
 
@@ -420,13 +422,17 @@ export const dispatchWorkflow = (
 
 		const timeoutKey = TIMEOUT_KEY_BY_KIND[params.kind];
 
-		return ok(`dispatched ${params.kind} → ${role} artifact=${artifactRel}`, {
-			task: rel(taskFile, root),
-			artifact: artifactRel,
-			round,
-			step: state.step,
-			timeout_ms: cfg.timeouts_ms[timeoutKey] ?? cfg.timeouts_ms.default,
-			launch,
-			next: "workflow_wait",
-		});
+		return ok(
+			`dispatched ${params.kind} → ${role} artifact=${artifactRel}`,
+			{
+				task: rel(taskFile, root),
+				artifact: artifactRel,
+				round,
+				step: state.step,
+				timeout_ms: cfg.timeouts_ms[timeoutKey] ?? cfg.timeouts_ms.default,
+				launch,
+				next: "workflow_wait",
+			},
+			nextAfter(state.step),
+		);
 	});

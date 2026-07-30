@@ -72,10 +72,7 @@ describe("startWorkflow (fake layers)", () => {
 			if (result.ok) {
 				expect(result.data?.next).toBe("dispatch_role");
 				expect(result.data?.next_args).toEqual({ kind: "plan" });
-				expect(result.data?.legal_next).toEqual([
-					"dispatch_role",
-					"workflow_status",
-				]);
+				expect(result.legal_next).toEqual(["dispatch_role", "workflow_wait"]);
 				expect(result.data?.note).toContain("does not launch roles");
 			}
 			expect(vcs.ensureBranches).toEqual([
@@ -117,6 +114,18 @@ describe("startWorkflow (fake layers)", () => {
 			);
 			expect(result.ok).toBe(true);
 			expect(vcs.ensureBranches).toEqual([{ root: ROOT, slug: "br" }]);
+		}).pipe(Effect.provide(layer));
+	});
+
+	itEffect("start tells the caller to dispatch the planner next", () => {
+		// Stopping after start is the single most common orchestration failure.
+		// The result itself has to say what comes next.
+		const fsFake = makeFakeFileSystem();
+		const { layer } = layerOf(fsFake, { detect: "git", dirty: false });
+		return Effect.gen(function* () {
+			const r = yield* startWorkflow({ goal: "x" }, ROOT);
+			expect(r.ok).toBe(true);
+			expect(r.legal_next).toContain("dispatch_role");
 		}).pipe(Effect.provide(layer));
 	});
 

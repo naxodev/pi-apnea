@@ -7,7 +7,11 @@ import {
 } from "../domain/frontmatter.ts";
 import { looksLikeShellOnly, parseFloatingExit } from "../domain/herdr.ts";
 import { abs, rel } from "../domain/paths.ts";
-import { stepAfterArtifact, toolAllowed } from "../domain/state-machine.ts";
+import {
+	nextAfter,
+	stepAfterArtifact,
+	toolAllowed,
+} from "../domain/state-machine.ts";
 import {
 	ArtifactInvalid,
 	GateRefused,
@@ -218,19 +222,17 @@ export const waitWorkflow = (
 				state.last_error = null;
 				yield* store.save(state, root);
 
-				return ok(`${msg}; step → ${next}`, {
-					artifact: rel(artifactAbs, root),
-					kind,
-					verdict,
-					nits: fm.nits ?? null,
-					step: next,
-					legal_next:
-						next === "committing"
-							? ["workflow_commit_phase"]
-							: next === "done"
-								? ["workflow_status"]
-								: ["dispatch_role", "workflow_status"],
-				});
+				return ok(
+					`${msg}; step → ${next}`,
+					{
+						artifact: rel(artifactAbs, root),
+						kind,
+						verdict,
+						nits: fm.nits ?? null,
+						step: next,
+					},
+					nextAfter(next),
+				);
 			});
 
 		const graceMs = 12_000;

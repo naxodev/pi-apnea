@@ -52,6 +52,17 @@ export const LEGAL_TOOLS: Record<
 export type ToolName = (typeof LEGAL_TOOLS)[Step][number];
 
 /**
+ * Actionable next calls for a step: `LEGAL_TOOLS` minus the read-only snapshot
+ * and the human-only cap reset. An agent follows this list literally, so it
+ * must contain only calls that move the run forward.
+ */
+export function nextAfter(step: Step): ToolName[] {
+	return LEGAL_TOOLS[step].filter(
+		(t) => t !== "workflow_status" && t !== "workflow_reset_rounds",
+	);
+}
+
+/**
  * Single source of truth for dispatch kinds — the Pi tool param schema
  * (`extension/index.ts`), the `state.json` codec (`schema/state.ts`) and the
  * `/apnea dispatch` completion list all derive from this tuple.

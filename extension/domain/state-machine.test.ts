@@ -3,6 +3,7 @@ import { Result } from "effect";
 import {
 	LEGAL_TOOLS,
 	allowedKinds,
+	nextAfter,
 	stepAfterArtifact,
 	toolAllowed,
 } from "./state-machine.ts";
@@ -54,5 +55,21 @@ describe("state machine", () => {
 			expect(r.failure.tool).toBe("dispatch_role");
 			expect(r.failure.legal).toEqual(["workflow_status"]);
 		}
+	});
+});
+
+describe("nextAfter", () => {
+	test("omits status and reset-rounds from suggested next steps", () => {
+		// legal_next is a suggestion an agent will follow literally. Suggesting
+		// the read-only snapshot or the human-only cap reset would stall the loop.
+		expect(nextAfter("planning")).toEqual(["dispatch_role", "workflow_wait"]);
+	});
+
+	test("committing suggests only the commit tool", () => {
+		expect(nextAfter("committing")).toEqual(["workflow_commit_phase"]);
+	});
+
+	test("done suggests nothing", () => {
+		expect(nextAfter("done")).toEqual([]);
 	});
 });

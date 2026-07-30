@@ -1,5 +1,5 @@
 import { Effect, Result } from "effect";
-import { LEGAL_TOOLS } from "../domain/state-machine.ts";
+import { LEGAL_TOOLS, nextAfter } from "../domain/state-machine.ts";
 import type { StateCorrupt } from "../errors.ts";
 import { ok, type ToolResult } from "../result.ts";
 import { Config } from "../services/config.ts";
@@ -32,10 +32,14 @@ export const statusWorkflow = (
 			: { config_error: cfgR.failure.message };
 
 		const vcs = yield* vcsSvc.detect(root);
-		return ok(`step=${state.step} phase=${state.phase_index}`, {
-			state,
-			legal_tools: LEGAL_TOOLS[state.step],
-			config: cfgSummary,
-			dirty: vcs ? yield* vcsSvc.isDirty(root, vcs) : null,
-		});
+		return ok(
+			`step=${state.step} phase=${state.phase_index}`,
+			{
+				state,
+				legal_tools: LEGAL_TOOLS[state.step],
+				config: cfgSummary,
+				dirty: vcs ? yield* vcsSvc.isDirty(root, vcs) : null,
+			},
+			nextAfter(state.step),
+		);
 	});
