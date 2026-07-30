@@ -55,9 +55,10 @@ const AGENTS_BLOCK_RE = /<!-- apnea:begin -->[\s\S]*?<!-- apnea:end -->\n?/;
 
 /**
  * Replace the marker-bounded block in place when present, otherwise append.
- * Exported for the test file's black-box assertions on merge behavior.
+ * Internal to `setupWorkflow`; `setup.test.ts` exercises merge behavior
+ * black-box, through the written `AGENTS.md` file, not by importing this.
  */
-export function mergeAgentsMd(existing: string | null): string {
+function mergeAgentsMd(existing: string | null): string {
 	if (existing == null || existing.length === 0) return AGENTS_SECTION;
 	if (AGENTS_BLOCK_RE.test(existing)) {
 		return existing.replace(AGENTS_BLOCK_RE, AGENTS_SECTION);

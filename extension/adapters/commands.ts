@@ -266,11 +266,9 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 					}
 
 					case "commit": {
-						const message =
-							rest
-								.filter((t) => !t.startsWith("--"))
-								.join(" ")
-								.trim() || undefined;
+						// `parseFlags` already strips `--` tokens into `flags`/`values`;
+						// `rest` never contains them, so no filter is needed here.
+						const message = rest.join(" ").trim() || undefined;
 						notify(
 							ctx,
 							await workflowCommitPhase({

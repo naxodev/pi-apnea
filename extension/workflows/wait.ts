@@ -437,6 +437,12 @@ export const waitWorkflow = (
 						}
 
 						// Idle and never nudged: final nudge + short grace.
+						// `!nudged` is what makes this rung cross-invocation-safe: `nudged`
+						// seeds from `state.pending_nudged_at` (line ~247), which `tryNudge`
+						// persists to disk, so a nudge sent in a *previous* `wait` call still
+						// suppresses this rung here. `!finalNudgeGrace` alone would not —
+						// it's a fresh per-call local and would re-fire every call. Keep both
+						// guards in sync if either changes.
 						if (
 							!finalNudgeGrace &&
 							!nudged &&
