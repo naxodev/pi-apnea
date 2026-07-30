@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DISPATCH_KINDS } from "../domain/state-machine.ts";
+import { OPERATIONS } from "../registry.ts";
 import { buildParams } from "./main.ts";
 import { parseFlags } from "./parse.ts";
 
@@ -59,6 +60,42 @@ describe("buildParams: argument shape per verb", () => {
 			params: { gate: "plan_review" },
 		});
 	});
+});
+
+describe("buildParams: every registry verb is routed, not defaulted", () => {
+	// `buildParams`'s `default: return { ok: false }` is exactly what a new
+	// OPERATIONS entry with no matching `case` falls through to — the
+	// registry exists so the CLI, `/apnea`, and Pi tools can't drift apart,
+	// but nothing stops someone adding a verb here without adding its case.
+	// Valid args per verb below drive every real switch case to its `ok: true`
+	// path; `default` returns the bare `{ ok: false }` shape (no `message`),
+	// which no real case ever returns — so this fails immediately if a verb's
+	// case is missing, deleted, or silently falls through. (Comment out any
+	// one `case` in `buildParams` and the matching test below turns red.)
+	const VALID_ARGV: Record<string, string[]> = {
+		setup: [],
+		start: ["fix", "the", "bug"],
+		dispatch: [DISPATCH_KINDS[0]],
+		wait: [],
+		commit: [],
+		status: [],
+		"reset-rounds": ["plan_review"],
+	};
+
+	for (const op of OPERATIONS) {
+		test(`"${op.verb}" reaches a real case`, () => {
+			const argv = VALID_ARGV[op.verb];
+			expect(
+				argv,
+				`no VALID_ARGV entry for verb "${op.verb}" — add one so this test covers it`,
+			).toBeDefined();
+			const result = build(op.verb, null, argv ?? []);
+			// The default fallthrough's exact shape — catches drift even if a
+			// future case starts returning `ok: false` for some other reason.
+			expect(result).not.toEqual({ ok: false });
+			expect(result.ok).toBe(true);
+		});
+	}
 });
 
 describe("resume/abandon route to the start operation", () => {
