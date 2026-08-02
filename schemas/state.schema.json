@@ -37,6 +37,10 @@
     "pending_pane_id": { "type": ["string", "null"] },
     "pending_pane_label": { "type": ["string", "null"] },
     "pending_floating_exit": { "type": ["string", "null"] },
+    "pending_started_at": { "type": ["integer", "null"] },
+    "pending_deadline_ms": { "type": ["integer", "null"] },
+    "pending_nudged_at": { "type": ["integer", "null"] },
+    "pending_extended": { "type": "boolean" },
     "role_panes": {
       "type": "object",
       "additionalProperties": {

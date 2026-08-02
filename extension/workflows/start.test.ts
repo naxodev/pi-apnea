@@ -68,10 +68,7 @@ describe("startWorkflow (fake layers)", () => {
 			if (result.ok) {
 				expect(result.data?.next).toBe("dispatch_role");
 				expect(result.data?.next_args).toEqual({ kind: "plan" });
-				expect(result.data?.legal_next).toEqual([
-					"dispatch_role",
-					"workflow_status",
-				]);
+				expect(result.legal_next).toEqual(["dispatch_role", "workflow_wait"]);
 				expect(result.data?.note).toContain("does not launch roles");
 			}
 			expect(vcs.ensureBranches).toEqual([
@@ -113,6 +110,18 @@ describe("startWorkflow (fake layers)", () => {
 		}).pipe(Effect.provide(layer));
 	});
 
+	itEffect("start tells the caller to dispatch the planner next", () => {
+		// Stopping after start is the single most common orchestration failure.
+		// The result itself has to say what comes next.
+		const fsFake = makeFakeFileSystem();
+		const { layer } = layerOf(fsFake, { detect: "git", dirty: false });
+		return Effect.gen(function* () {
+			const r = yield* startWorkflow({ goal: "x" }, ROOT);
+			expect(r.ok).toBe(true);
+			expect(r.legal_next).toContain("dispatch_role");
+		}).pipe(Effect.provide(layer));
+	});
+
 	itEffect("no vcs → VcsError", () => {
 		const fsFake = makeFakeFileSystem();
 		const { layer } = layerOf(fsFake, { detect: null });
@@ -142,6 +151,10 @@ describe("startWorkflow (fake layers)", () => {
 			pending_pane_id: null,
 			pending_pane_label: null,
 			pending_floating_exit: null,
+			pending_started_at: null,
+			pending_deadline_ms: null,
+			pending_nudged_at: null,
+			pending_extended: false,
 			role_panes: {},
 			package_root: "/pkg",
 			reviewer_tree_fingerprint: null,
@@ -198,6 +211,10 @@ describe("startWorkflow (fake layers)", () => {
 			pending_pane_id: null,
 			pending_pane_label: null,
 			pending_floating_exit: null,
+			pending_started_at: null,
+			pending_deadline_ms: null,
+			pending_nudged_at: null,
+			pending_extended: false,
 			role_panes: {},
 			package_root: "/pkg",
 			reviewer_tree_fingerprint: null,
@@ -267,6 +284,10 @@ describe("statusWorkflow (fake layers)", () => {
 			pending_pane_id: null,
 			pending_pane_label: null,
 			pending_floating_exit: null,
+			pending_started_at: null,
+			pending_deadline_ms: null,
+			pending_nudged_at: null,
+			pending_extended: false,
 			role_panes: {},
 			package_root: "/pkg",
 			reviewer_tree_fingerprint: null,
@@ -318,6 +339,10 @@ describe("resetRoundsWorkflow (fake layers)", () => {
 			pending_pane_id: null,
 			pending_pane_label: null,
 			pending_floating_exit: null,
+			pending_started_at: null,
+			pending_deadline_ms: null,
+			pending_nudged_at: null,
+			pending_extended: false,
 			role_panes: {},
 			package_root: "/pkg",
 			reviewer_tree_fingerprint: null,
@@ -368,6 +393,16 @@ describe("start/status adapters (temp dir)", () => {
 		const st = await workflowStatus();
 		expect(st.ok).toBe(true);
 		if (st.ok) expect(st.data?.has_state).toBe(false);
+	});
+
+	// `apnea status` is the likely first command a cold agent runs on a fresh
+	// checkout. Without a legal_next hint here, the self-describing promise
+	// breaks exactly at cold start — the agent gets no pointer to workflow_start.
+	test("status with no state → legal_next points at workflow_start", async () => {
+		const d = gitRepo();
+		process.chdir(d);
+		const st = await workflowStatus();
+		expect(st.legal_next).toEqual(["workflow_start"]);
 	});
 
 	test("reset-rounds on missing state → ok:false no-run-state", async () => {

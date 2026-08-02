@@ -573,6 +573,74 @@ describe("setupWorkflow (fake FileSystem + fake Herdr)", () => {
 	);
 
 	itEffect(
+		"--agents-md writes a loop primer naming the CLI, not tool names",
+		() => {
+			// A harness with no Apnea plugin learns the loop from AGENTS.md or not
+			// at all; the primer must name real commands, not tool names.
+			const fsFake = makeFakeFileSystem();
+			const { layer } = workflowLayer(fsFake);
+			const deps = fakeDeps({ onPath: onPathFrom({ pi: true }) });
+			return Effect.gen(function* () {
+				const result = yield* setupWorkflow({ agents_md: true }, ROOT, deps);
+				expect(result.ok).toBe(true);
+				const written = fsFake.files.get(path.join(ROOT, "AGENTS.md"));
+				expect(written).toBeDefined();
+				expect(written).toContain("apnea dispatch");
+				expect(written).toContain("apnea wait");
+				expect(written).not.toContain("dispatch_role");
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	itEffect(
+		"--agents-md appends rather than clobbering an existing file",
+		() => {
+			// Repos commonly already have AGENTS.md; destroying it would be a
+			// data-loss bug disguised as setup.
+			const agentsPath = path.join(ROOT, "AGENTS.md");
+			const fsFake = makeFakeFileSystem({
+				[agentsPath]: "# Existing\n\nkeep me\n",
+			});
+			const { layer } = workflowLayer(fsFake);
+			const deps = fakeDeps({ onPath: onPathFrom({ pi: true }) });
+			return Effect.gen(function* () {
+				const result = yield* setupWorkflow({ agents_md: true }, ROOT, deps);
+				expect(result.ok).toBe(true);
+				const written = fsFake.files.get(agentsPath)!;
+				expect(written).toContain("keep me");
+				expect(written).toContain("apnea dispatch");
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	itEffect(
+		"--agents-md re-run replaces only the marker block, not the whole file",
+		() => {
+			// Marker-guarded merge is the whole point: prove re-running setup
+			// doesn't duplicate the section or eat unrelated content around it.
+			const agentsPath = path.join(ROOT, "AGENTS.md");
+			const fsFake = makeFakeFileSystem();
+			const { layer } = workflowLayer(fsFake);
+			const deps = fakeDeps({ onPath: onPathFrom({ pi: true }) });
+			return Effect.gen(function* () {
+				yield* setupWorkflow({ agents_md: true }, ROOT, deps);
+				const firstWrite = fsFake.files.get(agentsPath)!;
+				fsFake.files.set(
+					agentsPath,
+					`# Notes\n\nabove\n\n${firstWrite}\nbelow\n`,
+				);
+				const result = yield* setupWorkflow({ agents_md: true }, ROOT, deps);
+				expect(result.ok).toBe(true);
+				const written = fsFake.files.get(agentsPath)!;
+				const occurrences = written.split("apnea:begin").length - 1;
+				expect(occurrences).toBe(1);
+				expect(written).toContain("above");
+				expect(written).toContain("below");
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	itEffect(
 		"prev.roles malformed without force → still ok, with the validation note present",
 		() => {
 			const gPath = globalConfigPath();

@@ -3,29 +3,25 @@
  * These call the same functions as the LLM tools — no workflow_* typing required.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { parseFlags, parseNumFlag } from "../cli/parse.ts";
 import { formatResult } from "../result.ts";
 import { apneaSetup } from "./setup.ts";
 import { DISPATCH_KINDS } from "../domain/state-machine.ts";
 import type { DispatchKind } from "../domain/state-machine.ts";
 import type { ToolResult } from "../result.ts";
+import { OPERATIONS } from "../registry.ts";
 import { workflowStart } from "./start.ts";
 import { workflowResetRounds, workflowStatus } from "./status.ts";
 import { workflowCommitPhase } from "./commit.ts";
 import { workflowDispatch } from "./dispatch.ts";
 import { workflowWait } from "./wait.ts";
 
-const SUBS = [
-	"setup",
-	"start",
+export const SUBS = [
+	...OPERATIONS.map((o) => o.verb),
 	"resume",
 	"abandon",
-	"status",
-	"dispatch",
-	"wait",
-	"commit",
-	"reset-rounds",
 	"help",
-] as const;
+] as const satisfies readonly string[];
 
 function notify(
 	ctx: {
@@ -61,43 +57,19 @@ function orchestratorKickMessage(
 	].join("\n");
 }
 
-/**
- * Split `--bare` switches from `--key=value` options; everything else is
- * positional. `values` matters: `rest` never sees a `--`-prefixed token, so
- * `--key=value` options are only reachable through the map.
- */
-export function parseFlags(tokens: string[]): {
-	flags: Set<string>;
-	values: Map<string, string>;
-	rest: string[];
-} {
-	const flags = new Set<string>();
-	const values = new Map<string, string>();
-	const rest: string[] = [];
-	for (const t of tokens) {
-		if (!t.startsWith("--")) {
-			rest.push(t);
-			continue;
-		}
-		const body = t.slice(2);
-		const eq = body.indexOf("=");
-		if (eq > 0) values.set(body.slice(0, eq), body.slice(eq + 1));
-		else flags.add(body);
-	}
-	return { flags, values, rest };
-}
-
 function helpText(): string {
+	// verb + usage on one line (what to type), summary indented below (what
+	// it does) — usage is what regressed when helpText() first went generated:
+	// it rendered only the LLM-facing summary and dropped the flag syntax.
+	const lines = OPERATIONS.map((o) => {
+		const invocation = o.usage ? `${o.verb} ${o.usage}` : o.verb;
+		return `  /apnea ${invocation}\n      ${o.summary}`;
+	});
 	return [
 		"Apnea commands (tools remain for the model; you use /apnea):",
-		"  /apnea setup [--project] [--force]   # global profiles; optional project bindings",
-		"  /apnea start <goal> [--allow-dirty] [--slug=name]",
-		"  /apnea resume | abandon | status",
-		"  /apnea wait [--timeout=<ms>]",
-		"  /apnea dispatch <kind> [--rework]",
-		`      kinds: ${DISPATCH_KINDS.join(" | ")}`,
-		"  /apnea commit [--done] [message]",
-		"  /apnea reset-rounds <gate>   (human only; e.g. plan_review or phase-01/code_review)",
+		...lines,
+		"  /apnea resume | abandon        # actions on an existing run",
+		`      dispatch kinds: ${DISPATCH_KINDS.join(" | ")}`,
 		"  /apnea help",
 	].join("\n");
 }
@@ -132,7 +104,7 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 			}
 			if (sub === "setup") {
 				const p = parts[1] ?? "";
-				const flags = ["--project", "--force"];
+				const flags = ["--project", "--force", "--agents-md"];
 				const hits = flags
 					.filter((f) => f.startsWith(p) || p === "")
 					.map((f) => ({ value: f, label: f }));
@@ -192,6 +164,7 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 							await apneaSetup({
 								project: flags.has("project"),
 								force: flags.has("force"),
+								agents_md: flags.has("agents-md"),
 							}),
 						);
 						return;
@@ -237,16 +210,43 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 						return;
 
 					case "wait": {
-						const timeoutTok = values.get("timeout");
-						const parsed = timeoutTok ? Number(timeoutTok) : undefined;
-						if (parsed !== undefined && !Number.isFinite(parsed)) {
+						// `--timeout` and `--budget` are the same knob: how long THIS
+						// call blocks. The role's deadline comes from config, stamped
+						// at dispatch. Same flags as `apnea wait`; only the default
+						// differs, because this surface has no host shell to time out.
+						const poll = parseNumFlag(values, "poll");
+						if (!poll.ok) {
 							ctx.ui.notify(
-								`Usage: /apnea wait [--timeout=<ms>] (got --timeout=${timeoutTok})`,
+								`Usage: /apnea wait [--poll=<ms>] (got --poll=${poll.raw})`,
 								"error",
 							);
 							return;
 						}
-						const r = await workflowWait({ timeout_ms: parsed });
+						const budget = parseNumFlag(values, "budget");
+						if (!budget.ok) {
+							ctx.ui.notify(
+								`Usage: /apnea wait [--budget=<ms>] (got --budget=${budget.raw})`,
+								"error",
+							);
+							return;
+						}
+						const timeout = parseNumFlag(values, "timeout");
+						if (!timeout.ok) {
+							ctx.ui.notify(
+								`Usage: /apnea wait [--timeout=<ms>] (got --timeout=${timeout.raw})`,
+								"error",
+							);
+							return;
+						}
+						const r = await workflowWait({
+							poll_ms: poll.value,
+							// Unbounded by default, like the Pi tool in `index.ts`:
+							// `/apnea` runs inside Pi, which has no shell timeout, so
+							// the CLI's 300s chunking default would end the wait with a
+							// green "still waiting" toast and nothing left polling.
+							budget_ms:
+								budget.value ?? timeout.value ?? Number.MAX_SAFE_INTEGER,
+						});
 						notify(ctx, r);
 						return;
 					}
@@ -271,11 +271,9 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 					}
 
 					case "commit": {
-						const message =
-							rest
-								.filter((t) => !t.startsWith("--"))
-								.join(" ")
-								.trim() || undefined;
+						// `parseFlags` already strips `--` tokens into `flags`/`values`;
+						// `rest` never contains them, so no filter is needed here.
+						const message = rest.join(" ").trim() || undefined;
 						notify(
 							ctx,
 							await workflowCommitPhase({

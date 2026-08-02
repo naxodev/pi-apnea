@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { packageRoot } from "../domain/paths.ts";
 import { slugify } from "../domain/slug.ts";
+import { nextAfter } from "../domain/state-machine.ts";
 import {
 	GateRefused,
 	NoRunState,
@@ -59,16 +60,20 @@ export const startWorkflow = (
 				const present = yield* fs.exists(absPath);
 				pendingStatus = present ? "artifact_exists" : "artifact_missing";
 			}
-			return ok("resume: re-resolve panes by label; do not auto-dispatch", {
-				state: existing,
-				pending_status: pendingStatus,
-				hint:
-					pendingStatus === "artifact_exists"
-						? "call workflow_wait to ingest pending artifact"
-						: pendingStatus === "artifact_missing"
-							? "offer re-dispatch same round via dispatch_role"
-							: "inspect workflow_status and continue legal next step",
-			});
+			return ok(
+				"resume: re-resolve panes by label; do not auto-dispatch",
+				{
+					state: existing,
+					pending_status: pendingStatus,
+					hint:
+						pendingStatus === "artifact_exists"
+							? "call workflow_wait to ingest pending artifact"
+							: pendingStatus === "artifact_missing"
+								? "offer re-dispatch same round via dispatch_role"
+								: "inspect workflow_status and continue legal next step",
+				},
+				nextAfter(existing.step),
+			);
 		}
 
 		// start
@@ -120,6 +125,10 @@ export const startWorkflow = (
 			pending_pane_id: null,
 			pending_pane_label: null,
 			pending_floating_exit: null,
+			pending_started_at: null,
+			pending_deadline_ms: null,
+			pending_nudged_at: null,
+			pending_extended: false,
 			role_panes: {},
 			package_root: packageRoot(),
 			reviewer_tree_fingerprint: null,
@@ -136,8 +145,8 @@ export const startWorkflow = (
 				roles: cfg.roles,
 				next: "dispatch_role",
 				next_args: { kind: "plan" },
-				legal_next: ["dispatch_role", "workflow_status"],
 				note: "start only writes state — it does not launch roles. Orchestrator must dispatch plan immediately.",
 			},
+			nextAfter(state.step),
 		);
 	});

@@ -85,6 +85,21 @@ describe("RunStateSchema", () => {
 		);
 	});
 
+	test("legacy state without dispatch-clock fields decodes with defaults", () => {
+		// A run started before the resumable-wait change must still load, or
+		// upgrading mid-run would strand the user with a corrupt-state error.
+		// `fullState` is the existing fixture; it predates the clock fields, which
+		// is exactly the shape a mid-run upgrade encounters on disk.
+		const r = decodeRunState({ ...fullState });
+		expect(Result.isSuccess(r)).toBe(true);
+		if (Result.isSuccess(r)) {
+			expect(r.success.pending_started_at).toBeNull();
+			expect(r.success.pending_deadline_ms).toBeNull();
+			expect(r.success.pending_nudged_at).toBeNull();
+			expect(r.success.pending_extended).toBe(false);
+		}
+	});
+
 	test("property names drift-guard vs schemas/state.schema.json", () => {
 		const jsonPath = path.join(repoRoot, "schemas/state.schema.json");
 		const doc = JSON.parse(fs.readFileSync(jsonPath, "utf8")) as {

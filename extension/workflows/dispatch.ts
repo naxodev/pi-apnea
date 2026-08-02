@@ -17,6 +17,7 @@ import {
 	toolAllowed,
 	type DispatchKind,
 } from "../domain/state-machine.ts";
+import { timeoutMsForKind } from "../domain/timeouts.ts";
 import {
 	ConfigError,
 	GateRefused,
@@ -38,19 +39,6 @@ export type DispatchParams = {
 	task_markdown?: string;
 	/** Increment round after CHANGES_REQUIRED (protocol: only then). */
 	rework?: boolean;
-};
-
-/**
- * Timeout budget key per kind — the step the kind runs *during*, which is why
- * these are step names rather than kind names.
- */
-const TIMEOUT_KEY_BY_KIND: Record<DispatchKind, string> = {
-	plan: "planning",
-	plan_review: "plan_review",
-	phase_package: "phase_packaging",
-	code: "coding",
-	code_review: "code_review",
-	pr_description: "finishing",
 };
 
 function taskBody(opts: {
@@ -181,6 +169,7 @@ export const dispatchWorkflow = (
 
 		const role = expectedRole(params.kind);
 		const cfg = yield* config.load(root);
+		const roleTimeoutMs = timeoutMsForKind(params.kind, cfg.timeouts_ms);
 
 		// --- Round numbers (increment ONLY on rework after CHANGES_REQUIRED) ---
 		let round = 1;
@@ -221,7 +210,7 @@ export const dispatchWorkflow = (
 		) {
 			return yield* new GateRefused({
 				gate: "round_cap",
-				message: `review round cap ${cfg.review_round_cap} exceeded for ${capKey}. Human: workflow_reset_rounds.`,
+				message: `review round cap ${cfg.review_round_cap} exceeded for ${capKey}. Human: apnea reset-rounds ${capKey} (or /apnea reset-rounds ${capKey}).`,
 				details: { gate_key: capKey, cap: cfg.review_round_cap },
 			});
 		}
@@ -335,11 +324,19 @@ export const dispatchWorkflow = (
 		};
 
 		if (!(yield* herdr.enabled)) {
+			// Stamped here, not at the top of the workflow: `pending_started_at` is
+			// the anchor for both the role's deadline and wait's liveness grace, so
+			// it must mean "the role has the prompt", not "dispatch began".
+			const launchedAt = yield* Clock.currentTimeMillis;
 			state.pending_artifact = artifactRel;
 			state.pending_role = role;
 			state.pending_pane_id = null;
 			state.pending_pane_label = null;
 			state.pending_floating_exit = null;
+			state.pending_started_at = launchedAt;
+			state.pending_deadline_ms = launchedAt + roleTimeoutMs;
+			state.pending_nudged_at = null;
+			state.pending_extended = false;
 			yield* store.save(state, root);
 			return ok(
 				`task written (no Herdr). Launch ${role} yourself; then workflow_wait.`,
@@ -351,6 +348,11 @@ export const dispatchWorkflow = (
 					launch,
 					next: "workflow_wait",
 				},
+				// Not `nextAfter(state.step)`: a dispatch is now outstanding, and
+				// `nextAfter` is step-derived so it cannot know that. Advertising
+				// `dispatch_role` here would invite a second dispatch that orphans
+				// this one's in-flight work and resets its deadline.
+				["workflow_wait"],
 			);
 		}
 
@@ -446,19 +448,32 @@ export const dispatchWorkflow = (
 			state.role_panes[role] = { pane_id: r.pane_id, label: r.label };
 		}
 
+		// After the launch, not before it: `runInteractivePrompt` blocks in
+		// `waitAgentReady` (up to 90s) plus prompt-submit retries. Anchoring at
+		// the top of the workflow charged that startup against the role's own
+		// deadline and burned wait's 12s liveness grace before the first poll.
+		const launchedAt = yield* Clock.currentTimeMillis;
 		state.pending_artifact = artifactRel;
 		state.pending_role = role;
+		state.pending_started_at = launchedAt;
+		state.pending_deadline_ms = launchedAt + roleTimeoutMs;
+		state.pending_nudged_at = null;
+		state.pending_extended = false;
 		yield* store.save(state, root);
 
-		const timeoutKey = TIMEOUT_KEY_BY_KIND[params.kind];
-
-		return ok(`dispatched ${params.kind} → ${role} artifact=${artifactRel}`, {
-			task: taskRef.task,
-			artifact: artifactRel,
-			round,
-			step: state.step,
-			timeout_ms: cfg.timeouts_ms[timeoutKey] ?? cfg.timeouts_ms.default,
-			launch,
-			next: "workflow_wait",
-		});
+		return ok(
+			`dispatched ${params.kind} → ${role} artifact=${artifactRel}`,
+			{
+				task: taskRef.task,
+				artifact: artifactRel,
+				round,
+				step: state.step,
+				timeout_ms: roleTimeoutMs,
+				launch,
+				next: "workflow_wait",
+			},
+			// See the no-Herdr return above: one dispatch is outstanding, so
+			// `workflow_wait` is the only call that moves this run forward.
+			["workflow_wait"],
+		);
 	});

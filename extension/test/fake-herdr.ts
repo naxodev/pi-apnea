@@ -1,4 +1,5 @@
 import { Effect, Layer } from "effect";
+import { TestClock } from "effect/testing";
 import { HerdrError } from "../errors.ts";
 import {
 	Herdr,
@@ -19,6 +20,21 @@ export type FakeHerdrOptions = {
 	failWriteScript?: HerdrError;
 	failOpenPane?: HerdrError;
 	linkResult?: { ok: boolean; raw: string };
+	/**
+	 * `paneRun` fails with this error. The send is still recorded in
+	 * `recorder.paneRuns` first — a real failed `herdr pane run` still reaches
+	 * the pane, so a test needs to tell "attempted but failed" apart from
+	 * "never attempted" (e.g. `tryNudge` in wait.ts must not skip the attempt).
+	 */
+	failPaneRun?: HerdrError;
+	/**
+	 * Advances the `TestClock` by this many ms before `runInteractivePrompt`
+	 * returns, modelling the real `waitAgentReady` block (services/herdr.ts,
+	 * up to 90s) so a test can assert what a slow interactive launch does to
+	 * clock-anchored fields (`pending_started_at`, `pending_deadline_ms`).
+	 * Requires the caller's layer to include `TestClock.layer()`.
+	 */
+	interactiveDelayMs?: number;
 };
 
 export type FakeHerdrRecorder = {
@@ -67,8 +83,15 @@ export function fakeHerdrLayer(opts: FakeHerdrOptions = {}): {
 			),
 
 		paneRun: (paneId, command) =>
-			Effect.sync(() => {
+			Effect.gen(function* () {
+				// Recorded before the failure check: a real `herdr pane run` still
+				// reaches the pane even when the CLI call itself fails, so a caller
+				// that only checks "was it attempted" (not "did it succeed") must see
+				// the attempt either way.
 				recorder.paneRuns.push({ paneId, command });
+				if (opts.failPaneRun) {
+					return yield* opts.failPaneRun;
+				}
 			}),
 
 		paneForegroundNames: () => Effect.sync(() => opts.foreground ?? []),
@@ -76,6 +99,12 @@ export function fakeHerdrLayer(opts: FakeHerdrOptions = {}): {
 		runInteractivePrompt: (role, cmd, prompt, prefer) =>
 			Effect.gen(function* () {
 				recorder.interactiveCalls.push({ role, cmd, prompt, prefer });
+				if (opts.interactiveDelayMs) {
+					// Models the real `waitAgentReady` block inside
+					// `runInteractivePrompt` (services/herdr.ts) so a test can assert
+					// what a slow launch does to clock-anchored state.
+					yield* TestClock.adjust(opts.interactiveDelayMs);
+				}
 				if (opts.interactive instanceof HerdrError) {
 					return yield* opts.interactive;
 				}

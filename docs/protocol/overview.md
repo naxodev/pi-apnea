@@ -37,7 +37,9 @@ Illegal tool calls refuse with the legal next call named in the error.
 | `workflow_wait` | Wait for artifact front-matter; treat agent-status as liveness only |
 | `workflow_commit_phase` | Require APPROVED + verify commands (log to `verify.log`) + VCS backend; advance phase |
 | `workflow_status` | **Read-only** snapshot |
-| `workflow_reset_rounds` | Human-only; not on orchestrator allowlist |
+
+Cap reset (`reset-rounds`) is not a Pi tool at all — it exists only as `apnea reset-rounds`
+(CLI) and `/apnea reset-rounds` (slash command), both human-only. See [ADR 0002](../adr/0002-orchestrator-authority.md).
 
 ## Dispatch pointer (all harnesses)
 

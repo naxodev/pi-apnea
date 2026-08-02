@@ -47,7 +47,7 @@ Requires `~/.config/apnea/config.json` profiles (see `docs/protocol/config.md` o
 
 | Command | Purpose |
 |---------|---------|
-| `/apnea setup [--project] [--force]` | global profiles (+ optional project bindings) |
+| `/apnea setup [--project] [--force] [--agents-md]` | global profiles (+ optional project bindings, `AGENTS.md` primer) |
 | `/apnea start <goal>` | start a run |
 | `/apnea resume` / `abandon` | resume or abandon |
 | `/apnea status` | read-only snapshot |
@@ -59,15 +59,53 @@ Requires `~/.config/apnea/config.json` profiles (see `docs/protocol/config.md` o
 
 ### Tools (model-facing names)
 
-Same operations as `workflow_start`, `dispatch_role`, `workflow_wait`, `workflow_commit_phase`, `workflow_status`, `workflow_reset_rounds`.
+Same operations as `workflow_start`, `dispatch_role`, `workflow_wait`, `workflow_commit_phase`, `workflow_status`, plus `read`.
 
-Orchestrator allowlist: all tools **except** `workflow_reset_rounds`, plus `read`.
+`reset-rounds` is not a Pi tool. It exists only as `apnea reset-rounds` (CLI) and `/apnea reset-rounds` (slash command). Only the CLI gates it — it refuses unless stdin/stdout are a terminal and a human retypes the gate key (or passes `--i-am-human`). The slash command has no such gate: `/apnea` is already a human at a terminal. See [ADR 0002](docs/adr/0002-orchestrator-authority.md).
+
+### CLI (`apnea`, no Pi required)
+
+Any harness that can run a shell command can hold the orchestrator seat — the CLI and the Pi
+tools share one definition in `extension/registry.ts`, so they can't drift apart (see
+[ADR 0009](docs/adr/0009-cli-driver-split.md)).
+
+`npm publish` needs `@naxodev/apnea` to lose its `"private": true` flag first, so
+`bun install -g @naxodev/apnea` does not work yet. Build from a checkout instead:
+
+```bash
+cd pi-apnea   # your checkout of this repo
+bun install
+bun run build
+./dist/cli.js help
+```
+
+Optionally put it on `PATH`, e.g. `ln -s "$(pwd)/dist/cli.js" ~/.local/bin/apnea`.
+
+| Verb | Purpose |
+|------|---------|
+| `apnea setup [--project] [--force] [--agents-md]` | global profiles (+ optional project bindings, `AGENTS.md` primer) |
+| `apnea start <goal> [--allow-dirty] [--slug=name]` | start a run |
+| `apnea resume` / `apnea abandon` | resume or abandon |
+| `apnea status` | read-only snapshot |
+| `apnea dispatch <kind> [--rework]` | launch a role |
+| `apnea wait [--poll=<ms>] [--budget=<ms>]` | wait for the pending artifact |
+| `apnea commit [--done] [message]` | verify + commit phase |
+| `apnea reset-rounds <gate> [--i-am-human]` | human only |
+
+`apnea wait` is resumable: exit `3` means the call's budget ran out but the role hasn't timed
+out, so call `apnea wait` again. Exit codes: `0` ok, `1` refused/error, `2` usage, `3` still
+waiting.
+
+`--timeout` is an alias for `--budget` on `apnea wait`. Both bound how long **this call**
+blocks (120s floor), not the role's deadline — the role timeout comes from `timeouts_ms` in
+config and is stamped at dispatch. See [`docs/protocol/config.md`](docs/protocol/config.md).
 
 ## Setup
 
 ```text
 /apnea setup              # ~/.config/apnea/config.json from PATH (+ herdr apnea plugin when herdr is present)
 /apnea setup --project    # also .apnea/config.json role→profile only
+/apnea setup --agents-md  # also write/refresh an AGENTS.md loop primer at the repo root
 ```
 
 `pane_style` (`regular` default, `floating` opt-in) lives in config; floating needs herdr ≥ 0.7.4 + the linked plugin — see [`docs/protocol/config.md`](docs/protocol/config.md).
