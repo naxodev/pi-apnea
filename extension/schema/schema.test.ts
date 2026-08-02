@@ -97,6 +97,10 @@ describe("RunStateSchema", () => {
 			expect(r.success.pending_deadline_ms).toBeNull();
 			expect(r.success.pending_nudged_at).toBeNull();
 			expect(r.success.pending_extended).toBe(false);
+			// A `true` default here would skip the final-nudge rung on the first
+			// deadline crossing of every pre-existing run, costing an idle role
+			// its 180s grace with nothing to catch it.
+			expect(r.success.pending_final_grace).toBe(false);
 		}
 	});
 

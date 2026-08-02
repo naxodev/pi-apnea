@@ -10,6 +10,7 @@ import {
 	rel,
 	tasksDir,
 } from "../domain/paths.ts";
+import { resetRecoveryLadder } from "../domain/recovery.ts";
 import { getRound, roundKey, setRound } from "../domain/rounds.ts";
 import {
 	allowedKinds,
@@ -335,8 +336,7 @@ export const dispatchWorkflow = (
 			state.pending_floating_exit = null;
 			state.pending_started_at = launchedAt;
 			state.pending_deadline_ms = launchedAt + roleTimeoutMs;
-			state.pending_nudged_at = null;
-			state.pending_extended = false;
+			resetRecoveryLadder(state);
 			yield* store.save(state, root);
 			return ok(
 				`task written (no Herdr). Launch ${role} yourself; then workflow_wait.`,
@@ -457,8 +457,7 @@ export const dispatchWorkflow = (
 		state.pending_role = role;
 		state.pending_started_at = launchedAt;
 		state.pending_deadline_ms = launchedAt + roleTimeoutMs;
-		state.pending_nudged_at = null;
-		state.pending_extended = false;
+		resetRecoveryLadder(state);
 		yield* store.save(state, root);
 
 		return ok(

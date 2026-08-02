@@ -52,6 +52,7 @@ export const RunStateSchema = Schema.Struct({
 	pending_started_at: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 	pending_deadline_ms: Schema.optionalKey(Schema.NullOr(Schema.Number)),
 	pending_nudged_at: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+	pending_final_grace: Schema.optionalKey(Schema.Boolean),
 	pending_extended: Schema.optionalKey(Schema.Boolean),
 	role_panes: Schema.optionalKey(
 		Schema.Record(Schema.String, PaneRefSchema),
@@ -98,6 +99,7 @@ export function decodeRunState(
 		pending_started_at: d.pending_started_at ?? null,
 		pending_deadline_ms: d.pending_deadline_ms ?? null,
 		pending_nudged_at: d.pending_nudged_at ?? null,
+		pending_final_grace: d.pending_final_grace ?? false,
 		pending_extended: d.pending_extended ?? false,
 		role_panes: { ...(d.role_panes ?? {}) },
 		package_root: d.package_root,

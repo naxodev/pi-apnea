@@ -40,6 +40,7 @@
     "pending_started_at": { "type": ["integer", "null"] },
     "pending_deadline_ms": { "type": ["integer", "null"] },
     "pending_nudged_at": { "type": ["integer", "null"] },
+    "pending_final_grace": { "type": "boolean" },
     "pending_extended": { "type": "boolean" },
     "role_panes": {
       "type": "object",

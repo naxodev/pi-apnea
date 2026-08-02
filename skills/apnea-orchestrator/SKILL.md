@@ -32,6 +32,10 @@ Use only these; the CLI column is the same operation for a harness with no Apnea
 | `workflow_commit_phase` | `apnea commit` |
 | `workflow_status` | `apnea status` |
 
+`apnea wait` returns exit `3` when its own budget runs out but the role still has time. That is not a failure. Call `apnea wait` again, as many times as it takes. The default budget is 90s, so the call returns before a typical 120s shell timeout kills it.
+
+Do not pass `--budget` below 72s. A call must be long enough to contain the 60s idle nudge and the four polls that detect a dead harness; a shorter call is refused, with the required floor in the message. Raising `--poll` raises that floor, and if you omit `--budget` it is raised to match, so the call runs longer rather than failing. Keep `--poll` between 250ms and 26999ms, or state `--budget` yourself — above that the floor outgrows a typical shell timeout. Whether the role was already nudged, already took its one-time extension, and its deadline all persist across calls — only these two duration checks need one call to complete.
+
 Never: `apnea reset-rounds` / `/apnea reset-rounds` (human only — it is not a model-facing tool at all, see [ADR 0002](../../docs/adr/0002-orchestrator-authority.md)), never edit `.apnea/state.json` by hand, never implement product code.
 
 ### Loop (do not skip steps)
