@@ -15,7 +15,9 @@ export type FakeHerdrOptions = {
 	hasPlugin?: boolean;
 	/** Function so a test can flip a pane's status between polls. */
 	pane?: (paneId: string) => PaneInfo;
-	foreground?: string[];
+	/** Function so a test can flip the foreground process list between polls,
+	 * the same way `pane` already does for status. */
+	foreground?: string[] | (() => string[]);
 	interactive?: InteractiveLaunch | HerdrError;
 	failWriteScript?: HerdrError;
 	failOpenPane?: HerdrError;
@@ -94,7 +96,12 @@ export function fakeHerdrLayer(opts: FakeHerdrOptions = {}): {
 				}
 			}),
 
-		paneForegroundNames: () => Effect.sync(() => opts.foreground ?? []),
+		paneForegroundNames: () =>
+			Effect.sync(() =>
+				(typeof opts.foreground === "function"
+					? opts.foreground()
+					: opts.foreground) ?? [],
+			),
 
 		runInteractivePrompt: (role, cmd, prompt, prefer) =>
 			Effect.gen(function* () {

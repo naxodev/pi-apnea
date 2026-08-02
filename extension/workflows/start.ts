@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { packageRoot } from "../domain/paths.ts";
+import { resetRecoveryLadder } from "../domain/recovery.ts";
 import { slugify } from "../domain/slug.ts";
 import { nextAfter } from "../domain/state-machine.ts";
 import {
@@ -128,6 +129,7 @@ export const startWorkflow = (
 			pending_started_at: null,
 			pending_deadline_ms: null,
 			pending_nudged_at: null,
+			pending_final_grace: false,
 			pending_extended: false,
 			role_panes: {},
 			package_root: packageRoot(),
@@ -135,6 +137,11 @@ export const startWorkflow = (
 			current_phase_package: null,
 			current_code_review: null,
 		};
+		// The literal above assigns the ladder's fields; this re-asserts them
+		// through the shared helper so a rung added there cannot be missed here.
+		// The type checker only catches a missing REQUIRED field — a flag added
+		// with a schema default would leave a fresh run carrying a stale rung.
+		resetRecoveryLadder(state);
 		yield* store.save(state, root);
 
 		return ok(

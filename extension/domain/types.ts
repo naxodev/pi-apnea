@@ -78,6 +78,13 @@ export interface RunState {
 	 * fresh process does not re-nudge a role it already nudged.
 	 */
 	pending_nudged_at: number | null;
+	/**
+	 * True once the final-nudge rung has granted its 180s grace. Persisted for
+	 * the same reason as `pending_extended`: as a per-call local the grace was
+	 * re-granted by every new `wait`, so a role behind a pane that cannot be
+	 * prompted extended its own deadline forever and never timed out.
+	 */
+	pending_final_grace: boolean;
 	/** True once the one-time deadline extension has been consumed. */
 	pending_extended: boolean;
 	/**

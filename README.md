@@ -97,8 +97,16 @@ out, so call `apnea wait` again. Exit codes: `0` ok, `1` refused/error, `2` usag
 waiting.
 
 `--timeout` is an alias for `--budget` on `apnea wait`. Both bound how long **this call**
-blocks (120s floor), not the role's deadline — the role timeout comes from `timeouts_ms` in
-config and is stamped at dispatch. See [`docs/protocol/config.md`](docs/protocol/config.md).
+blocks, not the role's deadline — the role timeout comes from `timeouts_ms` in config and is
+stamped at dispatch. The default budget is 90s, chosen to return before an unconfigured agent
+shell (commonly 120s) kills the call, so you get exit `3` rather than a killed command. The
+floor is `12s + max(60s, 4 x --poll)` — 72s at the default poll. That is the shortest call that
+can still contain the 60s idle nudge or four dead-harness polls, and those cannot be measured
+across calls because nothing watches the role in between. Raising `--poll` raises the floor; an
+omitted `--budget` is raised with it, so the call runs longer rather than being refused.
+`--poll` has a 250ms minimum, and a 26999ms maximum unless you pass `--budget` yourself — above that
+the floor exceeds the shell timeout, so no budget we could pick would survive. See
+[`docs/protocol/config.md`](docs/protocol/config.md).
 
 ## Setup
 

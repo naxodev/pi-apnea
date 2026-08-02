@@ -242,7 +242,7 @@ export function registerApneaCommands(pi: ExtensionAPI): void {
 							poll_ms: poll.value,
 							// Unbounded by default, like the Pi tool in `index.ts`:
 							// `/apnea` runs inside Pi, which has no shell timeout, so
-							// the CLI's 300s chunking default would end the wait with a
+							// the CLI's chunking default would end the wait with a
 							// green "still waiting" toast and nothing left polling.
 							budget_ms:
 								budget.value ?? timeout.value ?? Number.MAX_SAFE_INTEGER,

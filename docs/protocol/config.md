@@ -56,9 +56,61 @@ restarts and repeated `wait` calls.
 
 `apnea wait --timeout=<ms>` and `/apnea wait --timeout=<ms>` are a different knob: `--timeout`
 is an alias for `--budget`, and both bound how long **that one call** blocks before returning —
-not the role's deadline. There is a 120000ms floor. When the call's budget runs out before the
-role's deadline, it exits `3` ("still waiting") and the caller must call `wait` again; this does
-not extend or shorten the role's timeout.
+not the role's deadline. When the call's budget runs out before the role's deadline, it exits
+`3` ("still waiting") and the caller must call `wait` again; this does not extend or shorten the
+role's timeout.
+
+The **CLI's** default budget is 90000ms. Agent shell tools commonly default to a 120000ms
+timeout, and a budget above that is killed before it can return the exit `3` the resume protocol
+depends on — the caller sees a killed command instead of an instruction to call again.
+
+The `workflow_wait` **Pi tool** has no default budget: it blocks until the role finishes. Pi
+streams progress and can interrupt the call, so there is no host shell timeout to fit inside,
+and chunking it would only add tool round trips. Everything below about budgets and the poll
+ceiling therefore describes the CLI, or a Pi call that passes `budget_ms` explicitly.
+
+The floor is `12000 + max(60000, 4 x poll_ms)` — 72000ms at the default 2000ms poll. A call
+shorter than that is refused.
+
+The floor exists because two rungs measure a duration by polling: the idle nudge needs 60000ms
+of unbroken idleness, and the dead-harness check needs four consecutive shell-only polls. Both
+start after a 12000ms grace. A duration is only meaningful over an interval something actually
+watched, and nothing watches the role between `wait` calls, so each of those rungs has to
+complete inside a single call.
+
+An earlier version tried to carry those counters across calls in `state.json`. That cannot be
+made correct. The counter has to assume something about the gap it did not observe: assume
+"still idle" and a role that was working gets nudged; assume "not idle" and the evidence is
+discarded so the rung never fires. Both failures were reproduced.
+
+Facts do survive a gap, and stay in `state.json`: the role deadline, whether the one-time
+extension was consumed, whether the final grace was taken, and whether a nudge was sent.
+
+Raising `--poll` therefore raises the floor. When you do not pass `--budget`, the budget is
+raised to the floor for you, so `apnea wait --poll=20000` works — the call simply runs longer
+than the 90000ms default.
+
+That auto-raise stops above `--poll=26999`, the largest poll whose budget stays strictly under
+the 120000ms an agent shell commonly allows. The bound is strict because a call that runs
+exactly 120000ms is killed at the instant it would have returned exit `3`. Above it there is no
+budget that both clears the floor and returns in time, so `wait` refuses rather than picking one
+that gets killed. Passing `--budget` explicitly still works at any poll: it is a deliberate
+statement that your shell allows a longer call. An explicit budget under the floor is still
+refused.
+
+`poll_ms` must be at least 250ms. Every poll spawns two herdr subprocesses, so a smaller
+interval is a busy-spin rather than a faster wait. `budget_ms` must be finite. The sleep between
+polls is clamped to the remaining budget, so a large `poll_ms` cannot make a call outlive it.
+
+The idle nudge and the final grace are independent rungs. A role nudged early for going idle
+still receives its 180000ms grace at the deadline; it just is not prompted twice.
+
+The 60000ms idle threshold is a trade, not a tuned value. It is short enough that the rung fits
+a 90000ms call, and short enough to sometimes prompt a role that is working — a coder blocked on
+a slow test run can read `idle` for a minute. The nudge is one-shot, so a false one is spent. A
+90000ms threshold would raise the floor to 102000ms and force the default budget to about
+105000ms, leaving roughly 15000ms of margin under a 120000ms shell. Raise one and you must raise
+the other.
 
 ## Pane style
 

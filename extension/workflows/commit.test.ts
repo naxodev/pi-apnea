@@ -32,6 +32,7 @@ function baseState(over: Partial<RunState> = {}): RunState {
 		pending_started_at: null,
 		pending_deadline_ms: null,
 		pending_nudged_at: null,
+		pending_final_grace: false,
 		pending_extended: false,
 		role_panes: {},
 		package_root: "/pkg",

@@ -7,7 +7,16 @@ import { workflowResetRounds, workflowStatus } from "./adapters/status.ts";
 import { workflowWait } from "./adapters/wait.ts";
 import { DISPATCH_KINDS } from "./domain/state-machine.ts";
 import type { ToolResult } from "./result.ts";
-import type { WaitParams } from "./workflows/wait.ts";
+import {
+	DEAD_POLLS_NEEDED,
+	DEFAULT_BUDGET_MS,
+	GRACE_MS,
+	HOST_SHELL_TIMEOUT_MS,
+	IDLE_NUDGE_AFTER_MS,
+	MAX_AUTO_POLL_MS,
+	MIN_POLL_MS,
+	type WaitParams,
+} from "./workflows/wait.ts";
 
 export type Operation = {
 	/** Pi tool name, or null when the operation is not model-facing. */
@@ -126,18 +135,45 @@ export const OPERATIONS: readonly Operation[] = [
 		usage: "[--poll=<ms>] [--budget=<ms>|--timeout=<ms>]",
 		summary: "Wait for the pending artifact's front-matter to be complete.",
 		guidance:
-			"Blocks until the artifact is ready or the role times out. Exit is non-fatal when the call's budget is spent but the role still has time — call again.",
+			"Blocks until the artifact is ready or the role times out. Exit is non-fatal when the call's budget is spent but the role still has time — call again. Omit both parameters unless you have a reason.",
 		// `timeout_ms` was dropped in Task 3: dispatch always stamps the deadline,
 		// so it no-opped for every real run. The role timeout lives in config.
+		//
+		// Only `minimum` is a schema-level bound, because only it is
+		// unconditional. The poll ceiling applies solely when budget_ms is
+		// absent, and a `maximum` here would have declared a limit the runtime
+		// does not enforce — rejecting the legal large-poll-with-explicit-budget
+		// call at the boundary, or lying to a model that never hits it.
+		//
+		// The floor is interpolated from the constants, not spelled out. A
+		// hardcoded formula here goes stale the moment IDLE_NUDGE_AFTER_MS
+		// moves, and then the schema promises a budget the runtime refuses.
 		params: Type.Object({
-			poll_ms: Type.Optional(Type.Number()),
-			budget_ms: Type.Optional(Type.Number()),
+			poll_ms: Type.Optional(
+				Type.Number({
+					minimum: MIN_POLL_MS,
+					description:
+						`Milliseconds between polls. At least ${MIN_POLL_MS} — each poll spawns two herdr subprocesses. ` +
+						`Keep it at or under ${MAX_AUTO_POLL_MS} unless you also pass budget_ms: above that, the floor ` +
+						`below forces a budget past the ${HOST_SHELL_TIMEOUT_MS}ms an agent shell commonly allows, and the call is refused.`,
+				}),
+			),
+			budget_ms: Type.Optional(
+				Type.Number({
+					description:
+						`How long THIS call may block — not the role's deadline, which comes from config. ` +
+						`Must be at least ${GRACE_MS} + max(${IDLE_NUDGE_AFTER_MS}, ${DEAD_POLLS_NEEDED} x poll_ms), so the call ` +
+						`can contain a whole recovery rung. Omitting it is usually right: this tool then blocks until the ` +
+						`role finishes, streaming progress and interruptible, because it has no host shell timeout to fit inside. ` +
+						`The apnea CLI, which does, defaults to ${DEFAULT_BUDGET_MS}ms instead and returns exit 3 to be called again.`,
+				}),
+			),
 		}),
 		// The Pi driver bypasses this handler entirely — Task 5 special-cases
 		// workflow_wait and calls workflowWait directly with its own streaming
 		// hooks, supplying its own budget (see extension/index.ts). This run is
 		// reached only by the CLI, which must not block forever, so params pass
-		// through unchanged and DEFAULT_BUDGET_MS (300s) applies when budget_ms
+		// through unchanged and DEFAULT_BUDGET_MS applies when budget_ms
 		// is absent. No hooks parameter here — nothing calls op.run with one.
 		run: (p) => workflowWait(p as WaitParams),
 	},
