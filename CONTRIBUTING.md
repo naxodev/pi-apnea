@@ -89,7 +89,8 @@ nothing in the automated loop executes the steps below.
 3. Run `npm pack --dry-run` and read the file list before publishing anything.
 4. `npm publish`. This must run on a machine with `bun` on `PATH`: the `prepare` script
    shells out to `bun run build`, and npm runs `prepare` during publish.
-5. Tag the release and push the tag.
+5. Remove the "not yet published" note from `README.md`'s Install section.
+6. Tag the release and push the tag.
 
 `publishConfig.access` is already `"public"` in the manifest, so no `--access public` flag is
 needed on the command.
