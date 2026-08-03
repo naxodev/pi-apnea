@@ -1,6 +1,26 @@
+/**
+ * Join shell line-continuations before anything else looks at the lines.
+ *
+ * A trailing `\` means "this command continues"; splitting on newlines alone
+ * turns one command into two broken ones. The failure is badly disguised: the
+ * commit gate reported `grep: \: No such file or directory` and refused a
+ * phase whose real checks had all passed, so the message pointed at `grep`
+ * rather than at the parser.
+ *
+ * An EVEN number of trailing backslashes is an escaped backslash, not a
+ * continuation, so only an odd run continues the line.
+ */
+function joinContinuations(body: string): string {
+	// Whitespace on BOTH sides of the break is consumed and replaced by exactly
+	// one space, so `a \` + `  b` joins as `a b` rather than `a  b`.
+	return body.replace(/[ \t]*(\\*)\\[ \t]*\r?\n[ \t]*/g, (match, prefix: string) =>
+		prefix.length % 2 === 0 ? " " : match,
+	);
+}
+
 function commandsFromFenceBody(body: string): string[] {
 	const cmds: string[] = [];
-	for (const line of body.split(/\r?\n/)) {
+	for (const line of joinContinuations(body).split(/\r?\n/)) {
 		const t = line.trim();
 		if (!t || t.startsWith("#")) continue;
 		cmds.push(t);
