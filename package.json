@@ -1,11 +1,25 @@
 {
   "name": "@naxodev/apnea",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Multi-role Pi + Herdr workflow: file-backed handoffs, no hidden subagents",
   "license": "MIT",
+  "author": "Nacho Vazquez",
+  "homepage": "https://github.com/naxodev/pi-apnea#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/naxodev/pi-apnea.git"
+  },
+  "bugs": {
+    "url": "https://github.com/naxodev/pi-apnea/issues"
+  },
   "type": "module",
   "bin": { "apnea": "./dist/cli.js" },
+  "engines": {
+    "bun": ">=1.3.7"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "bun build ./extension/cli/main.ts --target=bun --outfile ./dist/cli.js",
     "test": "bun test",
@@ -19,14 +33,15 @@
     "extensions": ["./extension"]
   },
   "files": [
+    "LICENSE",
     "CONTEXT.md",
     "README.md",
     "briefs",
-    "docs",
+    "docs/protocol",
+    "docs/adr",
     "schemas",
     "skills",
     "prompts",
-    "examples",
     "extension",
     "herdr-plugin",
     "dist"
