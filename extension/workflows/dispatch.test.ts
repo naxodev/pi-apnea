@@ -2,7 +2,7 @@ import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, test } from "bun:test";
 import * as path from "node:path";
-import { statePath } from "../domain/paths.ts";
+import { packageRoot, statePath } from "../domain/paths.ts";
 import type { ApneaConfig, RunState } from "../domain/types.ts";
 import { HerdrError, toToolResult } from "../errors.ts";
 import { expectFailure } from "../test/expect-failure.ts";
@@ -72,9 +72,21 @@ function baseState(overrides: Partial<RunState> = {}): RunState {
 	};
 }
 
+// Every role's brief, under the fake `package_root`. Dispatch refuses to launch
+// a pane when the brief is missing — a role told to read a file that is not
+// there just stalls, with no error from apnea — so a fixture without briefs
+// models a broken install, not a normal one.
+const BRIEFS: Record<string, string> = Object.fromEntries(
+	["planner", "reviewer", "coder"].map((role) => [
+		`/pkg/briefs/${role}.md`,
+		`# ${role} brief\n`,
+	]),
+);
+
 function seedFs(state: RunState, files: Record<string, string> = {}) {
 	return makeFakeFileSystem({
 		[statePath(ROOT)]: `${JSON.stringify(state, null, 2)}\n`,
+		...BRIEFS,
 		...files,
 	});
 }
@@ -705,5 +717,52 @@ describe("dispatchWorkflow (fake layers)", () => {
 		expect(state.pending_deadline_ms! - state.pending_started_at!).toBe(
 			1_500_000,
 		);
+	});
+});
+
+describe("dispatchWorkflow — stale package_root", () => {
+	// The packageRoot fix only reaches NEW runs: `start` freezes the value into
+	// state.json, so a run begun by a build with the wrong root keeps pointing
+	// every brief at the repo's parent even after upgrading. Resolving against
+	// the live root first repairs those runs in place instead of requiring the
+	// user to throw the run away.
+	itEffect("falls forward to the live package root when state.json holds a stale one", () => {
+		const state = baseState({
+			step: "planning",
+			package_root: "/stale/parent/dir",
+		});
+		const live = packageRoot();
+		const fsFake = makeFakeFileSystem({
+			[statePath(ROOT)]: `${JSON.stringify(state, null, 2)}\n`,
+			// Briefs exist ONLY under the live root, never under the stale one.
+			[`${live}/briefs/planner.md`]: "# planner brief\n",
+		});
+		const { layer } = layerOf(fsFake, { herdr: { enabled: false } });
+		return Effect.gen(function* () {
+			const r = yield* dispatchWorkflow({ kind: "plan" }, ROOT);
+			expect(r.ok).toBe(true);
+		}).pipe(Effect.provide(layer));
+	});
+});
+
+describe("dispatchWorkflow — missing brief", () => {
+	// A pane launched with a prompt pointing at a brief that is not there does
+	// not fail: the role simply sits in the pane, and apnea reports a healthy
+	// dispatch. That is what a wrong package root produced, and it cost a whole
+	// run before anyone noticed. Refuse before launching, and name what was
+	// tried so the cause is visible.
+	itEffect("refuses instead of launching a pane, and names the paths it tried", () => {
+		const state = baseState({ step: "planning" });
+		const fsFake = makeFakeFileSystem({
+			[statePath(ROOT)]: `${JSON.stringify(state, null, 2)}\n`,
+			// deliberately no briefs/
+		});
+		const { layer } = layerOf(fsFake, { herdr: { enabled: false } });
+		return Effect.gen(function* () {
+			const r = yield* Effect.result(dispatchWorkflow({ kind: "plan" }, ROOT));
+			const e = expectFailure(r, "GateRefused");
+			expect(toToolResult(e).error).toContain("no brief for role");
+			expect(toToolResult(e).error).toContain("briefs/planner.md");
+		}).pipe(Effect.provide(layer));
 	});
 });

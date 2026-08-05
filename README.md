@@ -77,48 +77,36 @@ Any harness that can run a shell command can hold the orchestrator seat — the 
 tools share one definition in `extension/registry.ts`, so they can't drift apart (see
 [ADR 0009](docs/adr/0009-cli-driver-split.md)).
 
-### Commands (you type these — `/` autocomplete, inside Pi)
+### Operations
 
-| Command | Purpose |
-|---------|---------|
-| `/apnea setup [--project] [--force] [--agents-md]` | global profiles (+ optional project bindings, `AGENTS.md` primer) |
-| `/apnea start <goal>` | start a run |
-| `/apnea resume` / `abandon` | resume or abandon |
-| `/apnea status` | read-only snapshot |
-| `/apnea dispatch <kind> [--rework]` | launch a role |
-| `/apnea wait` | wait for artifact |
-| `/apnea commit [--done] [msg]` | verify + commit phase |
-| `/apnea reset-rounds <gate>` | **human only** |
-| `/apnea-start` / `/apnea-status` | short aliases |
+One row per operation. The CLI verb and the `/apnea` subcommand are the same word — they share a
+single definition in `extension/registry.ts`, so they cannot drift apart (see
+[ADR 0009](docs/adr/0009-cli-driver-split.md)). The two were listed as separate tables until one
+of them went stale; a reader could not tell which.
 
-### Tools (model-facing names)
+| Operation | Pi tool | Flags | Purpose |
+|---|---|---|---|
+| `setup` | — | `[--project] [--force] [--agents-md]` | global profiles, optional project bindings, `AGENTS.md` primer |
+| `start <goal>` | `workflow_start` | `[--allow-dirty] [--slug=name]` *(CLI only)* | start a run |
+| `resume` / `abandon` | `workflow_start` | | resume or abandon |
+| `status` | `workflow_status` | | read-only snapshot |
+| `dispatch <kind>` | `dispatch_role` | `[--rework]` | launch a role |
+| `wait` | `workflow_wait` | `[--poll=<ms>] [--budget=<ms>]` *(CLI only)* | wait for the pending artifact |
+| `commit [message]` | `workflow_commit_phase` | `[--done]` | verify + commit phase |
+| `reset-rounds <gate>` | — | `[--i-am-human]` *(CLI only)* | **human only** |
 
-Same operations as `workflow_start`, `dispatch_role`, `workflow_wait`, `workflow_commit_phase`,
-`workflow_status`, plus `read`.
+Prefix with `/` inside Pi (`/apnea status`), or run it as a shell command (`apnea status`).
+`/apnea-start` and `/apnea-status` are short aliases. The Pi tools also include `read`.
 
-`reset-rounds` is not a Pi tool. It exists only as `apnea reset-rounds` (CLI) and
-`/apnea reset-rounds` (slash command). Only the CLI gates it — it refuses unless stdin/stdout are
-a terminal and a human retypes the gate key (or passes `--i-am-human`). The slash command has no
-such gate: `/apnea` is already a human at a terminal. See
-[ADR 0002](docs/adr/0002-orchestrator-authority.md).
+`reset-rounds` is not a Pi tool. It exists only as `apnea reset-rounds` and `/apnea reset-rounds`.
+Only the CLI gates it — it refuses unless stdin/stdout are a terminal and a human retypes the gate
+key, or passes `--i-am-human`. The slash command has no such gate: `/apnea` is already a human at
+a terminal. See [ADR 0002](docs/adr/0002-orchestrator-authority.md).
 
-### CLI (`apnea`, no Pi required)
-
-| Verb | Purpose |
-|------|---------|
-| `apnea setup [--project] [--force] [--agents-md]` | global profiles (+ optional project bindings, `AGENTS.md` primer) |
-| `apnea start <goal> [--allow-dirty] [--slug=name]` | start a run |
-| `apnea resume` / `apnea abandon` | resume or abandon |
-| `apnea status` | read-only snapshot |
-| `apnea dispatch <kind> [--rework]` | launch a role |
-| `apnea wait [--poll=<ms>] [--budget=<ms>]` | wait for the pending artifact |
-| `apnea commit [--done] [message]` | verify + commit phase |
-| `apnea reset-rounds <gate> [--i-am-human]` | human only |
-
-`apnea wait` is resumable: exit `3` means the call's budget ran out but the role hasn't timed
-out, so call `apnea wait` again. Exit codes: `0` ok, `1` refused/error, `2` usage, `3` still
-waiting. See [`docs/protocol/config.md`](docs/protocol/config.md) for the budget-floor
-arithmetic behind `--poll` and `--budget`.
+`apnea wait` is resumable: exit `3` means the call's budget ran out but the role hasn't timed out,
+so call `apnea wait` again. Exit codes: `0` ok, `1` refused/error, `2` usage, `3` still waiting.
+See [`docs/protocol/config.md`](docs/protocol/config.md) for the budget-floor arithmetic behind
+`--poll` and `--budget`.
 
 ### Setup flags
 

@@ -1,31 +1,71 @@
 /**
- * Join shell line-continuations before anything else looks at the lines.
+ * Drop whole-line `#` comments.
  *
- * A trailing `\` means "this command continues"; splitting on newlines alone
- * turns one command into two broken ones. The failure is badly disguised: the
- * commit gate reported `grep: \: No such file or directory` and refused a
- * phase whose real checks had all passed, so the message pointed at `grep`
- * rather than at the parser.
- *
- * An EVEN number of trailing backslashes is an escaped backslash, not a
- * continuation, so only an odd run continues the line.
+ * Runs BEFORE continuations are joined, because a shell comment extends to the
+ * end of its physical line: the `\` in `# note \` is inside the comment and
+ * continues nothing. Joining first and filtering after merged the comment with
+ * the command below it and then discarded both, so a fence whose first line was
+ * a trailing-backslash comment lost its next command entirely — `bun test
+ * extension` silently never ran and the phase committed green.
  */
-function joinContinuations(body: string): string {
-	// Whitespace on BOTH sides of the break is consumed and replaced by exactly
-	// one space, so `a \` + `  b` joins as `a b` rather than `a  b`.
-	return body.replace(/[ \t]*(\\*)\\[ \t]*\r?\n[ \t]*/g, (match, prefix: string) =>
-		prefix.length % 2 === 0 ? " " : match,
-	);
+function stripComments(lines: string[]): string[] {
+	return lines.filter((line) => !line.trim().startsWith("#"));
+}
+
+/**
+ * Join shell line-continuations, line by line.
+ *
+ * A line ends in a continuation when it ends in an ODD run of backslashes; an
+ * even run is escaped literals and ends the command. The final backslash is
+ * removed and the next line is appended with NOTHING between them — that is
+ * what a shell does, and it is the part the first version of this got wrong.
+ * It substituted a single space, which corrupts two real cases:
+ *
+ *   test -f docs/over\ + view.md   -> `over view.md`, not `overview.md`
+ *   grep -q 'foo \    + `   bar'`  -> the quoted pattern silently changes
+ *
+ * The second is the dangerous one: the gate greps a pattern nobody wrote and
+ * can report a pass for a check that never held.
+ *
+ * The backslash must also be the LAST character. `echo hi \ ` with a trailing
+ * space escapes the space and ends the command; treating it as a continuation
+ * swallowed the following command as an argument, so the suite went unrun and
+ * the gate passed.
+ */
+function joinContinuations(lines: string[]): string[] {
+	const out: string[] = [];
+	let acc = "";
+	let pending = false;
+	for (const line of lines) {
+		const run = /(\\+)$/.exec(line);
+		const continues = run !== null && run[1]!.length % 2 === 1;
+		// Drop only the final backslash; an odd run longer than one leaves
+		// literal backslashes behind that the command still needs.
+		const text = continues ? line.slice(0, -1) : line;
+		acc = pending ? acc + text : text;
+		pending = continues;
+		if (!continues) {
+			out.push(acc);
+			acc = "";
+		}
+	}
+	// A dangling continuation on the last line: keep what we have rather than
+	// dropping the command on the floor.
+	if (pending) out.push(acc);
+	return out;
+}
+
+function toCommands(lines: string[]): string[] {
+	const cmds: string[] = [];
+	for (const joined of joinContinuations(stripComments(lines))) {
+		const t = joined.trim();
+		if (t) cmds.push(t);
+	}
+	return cmds;
 }
 
 function commandsFromFenceBody(body: string): string[] {
-	const cmds: string[] = [];
-	for (const line of joinContinuations(body).split(/\r?\n/)) {
-		const t = line.trim();
-		if (!t || t.startsWith("#")) continue;
-		cmds.push(t);
-	}
-	return cmds;
+	return toCommands(body.split(/\r?\n/));
 }
 
 /**
@@ -55,9 +95,16 @@ export function extractVerifyCommands(phasePackageText: string): string[] {
 		if (cmds.length) return cmds;
 	}
 
-	// Last resort: $ / test / bun lines
+	// Last resort: $ / test / bun lines.
+	//
+	// Joined first, like both fence paths. This path was left splitting on raw
+	// newlines when continuations were introduced, so a package with no fence
+	// still dropped the continuation line and kept a dangling backslash — the
+	// original bug, still live in the one path nobody looked at.
 	const cmds: string[] = [];
-	for (const line of phasePackageText.split(/\r?\n/)) {
+	for (const line of joinContinuations(
+		stripComments(phasePackageText.split(/\r?\n/)),
+	)) {
 		const m = line.match(
 			/^\s*(?:\$\s+)?((?:test |node |npm |bun |bunx |chmod |head ).+)$/,
 		);

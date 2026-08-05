@@ -3,6 +3,7 @@ import { Clock, Effect, Result } from "effect";
 import { effectivePaneStyle, supportsFloating } from "../domain/herdr.ts";
 import {
 	abs,
+	packageRoot,
 	phaseDir,
 	planPath,
 	planReviewPath,
@@ -284,7 +285,35 @@ export const dispatchWorkflow = (
 		}
 
 		const artifactRel = rel(artifactAbs, root);
-		const briefAbs = path.join(state.package_root, "briefs", `${role}.md`);
+		// Prefer the live package root over the one frozen into state.json at
+		// `start`. A run started by a build with a wrong root — or before the
+		// package moved — keeps pointing every brief at a directory that does
+		// not exist, and the only symptom is a role sitting in a pane having
+		// been told to read a missing file. `state.package_root` stays as the
+		// fallback so a genuinely relocated checkout still resolves.
+		const livePackageRoot = packageRoot();
+		const briefCandidates = [
+			path.join(livePackageRoot, "briefs", `${role}.md`),
+			path.join(state.package_root, "briefs", `${role}.md`),
+		];
+		let briefAbs = briefCandidates[0]!;
+		for (const candidate of briefCandidates) {
+			if (yield* fs.exists(candidate)) {
+				briefAbs = candidate;
+				break;
+			}
+		}
+		if (!(yield* fs.exists(briefAbs))) {
+			// Refuse loudly here rather than launching a pane whose role will
+			// stall on a missing file with no diagnostic from apnea.
+			return yield* new GateRefused({
+				gate: "brief",
+				message:
+					`no brief for role "${role}". Looked in ${briefCandidates.join(" and ")}. ` +
+					`The package root could not be resolved — reinstall @naxodev/apnea, or start a fresh run if this one predates a move.`,
+				details: { role, tried: briefCandidates },
+			});
+		}
 		const body = taskBody({
 			kind: params.kind,
 			role,

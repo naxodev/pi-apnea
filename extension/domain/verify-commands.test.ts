@@ -60,43 +60,77 @@ bunx tsc --noEmit
 	});
 });
 
+// One backslash, written without a literal so the escaping in these cases stays
+// readable. Every string below is the exact text a planner would put in a fence.
+const B = String.fromCharCode(92);
+const fence = (body: string) => `## Verify commands\n\n\`\`\`sh\n${body}\n\`\`\``;
+
 describe("extractVerifyCommands — line continuations", () => {
-	// Hit live: a planner wrote a long grep across two lines, and the gate ran
-	// the halves as separate commands. The second half failed with
-	// `grep: \: No such file or directory`, so a phase whose 304 tests, tsc,
-	// build and tarball checks had all passed was refused, and the message
-	// blamed grep rather than the parser. Planners write continuations
-	// naturally; this recurred in two consecutive phases.
-	test("joins a backslash continuation into one command", () => {
-		const pkg = [
-			"## Verify commands",
-			"",
-			"```sh",
-			'grep -rl "/Users/" CONTEXT.md briefs \\',
-			"  extension dist || echo ok",
-			"bun test extension",
-			"```",
-		].join("\n");
-		expect(extractVerifyCommands(pkg)).toEqual([
-			'grep -rl "/Users/" CONTEXT.md briefs extension dist || echo ok',
-			"bun test extension",
+	// The gate splits the fence into commands and runs each one. Every case here
+	// was reproduced against the first version of this parser, and three of them
+	// made the gate report a phase VERIFIED without running its checks — worse
+	// than the refusal the continuation support was added to fix.
+
+	test("joins a continuation the way a shell does: no separator inserted", () => {
+		// The first version substituted a single space. `over` + `view.md` then
+		// became two arguments instead of one path.
+		expect(extractVerifyCommands(fence(`test -f docs/over${B}\nview.md`))).toEqual([
+			"test -f docs/overview.md",
 		]);
+	});
+
+	test("preserves whitespace inside a continued quoted string", () => {
+		// Collapsing to one space rewrites the pattern being searched for, so the
+		// gate can report a pass for a check that never held.
+		expect(
+			extractVerifyCommands(fence(`grep -q 'foo ${B}\n   bar' README.md`)),
+		).toEqual(["grep -q 'foo    bar' README.md"]);
+	});
+
+	test("does not let a commented line swallow the command below it", () => {
+		// A shell comment ends at its physical line; the backslash in it continues
+		// nothing. Joining before stripping comments merged the two and dropped
+		// both, so `bun test extension` never ran and the phase committed green.
+		expect(
+			extractVerifyCommands(
+				fence(`# smoke check ${B}\nbun test extension\nbunx tsc --noEmit`),
+			),
+		).toEqual(["bun test extension", "bunx tsc --noEmit"]);
+	});
+
+	test("treats a backslash followed by a space as an escaped space, not a continuation", () => {
+		// Trailing whitespace after a backslash is a routine editor artifact. The
+		// first version joined here and swallowed the next command as an argument
+		// to `echo`, which exits 0 — suite unrun, gate green.
+		expect(
+			extractVerifyCommands(fence(`echo hi ${B} \nbun test extension`)),
+		).toEqual([`echo hi ${B}`, "bun test extension"]);
+	});
+
+	test("removes only the final backslash of an odd run, leaving literals for the shell", () => {
+		// Three backslashes are one escaped literal plus one continuation. The
+		// first version dropped all of them, so an escaped pattern lost its escape
+		// and a guard written to fail matched nothing and passed.
+		expect(
+			extractVerifyCommands(fence(`printf 'a'${B}${B}${B}\nbun test extension`)),
+		).toEqual([`printf 'a'${B}${B}bun test extension`]);
+	});
+
+	test("an even backslash run ends the command", () => {
+		expect(
+			extractVerifyCommands(fence(`printf 'x' ${B}${B}\nbun test extension`)),
+		).toEqual([`printf 'x' ${B}${B}`, "bun test extension"]);
 	});
 
 	test("joins a continuation spanning three lines", () => {
-		const pkg = ["```sh", "a \\", "  b \\", "  c", "```"].join("\n");
-		expect(extractVerifyCommands(pkg)).toEqual(["a b c"]);
+		expect(extractVerifyCommands(fence(`a ${B}\nb ${B}\nc`))).toEqual(["a b c"]);
 	});
 
-	// An escaped backslash is a literal, not a continuation. `printf 'x\\'`
-	// ends the command; joining here would swallow the next command into it.
-	test("does not join when the trailing backslash is itself escaped", () => {
-		const pkg = ["```sh", "printf 'x' \\\\", "bun test extension", "```"].join(
-			"\n",
-		);
-		expect(extractVerifyCommands(pkg)).toEqual([
-			"printf 'x' \\\\",
-			"bun test extension",
-		]);
+	// The fence paths were fixed and this one was not, so the original bug stayed
+	// live wherever a package had no sh/bash fence.
+	test("joins continuations on the non-fence fallback path too", () => {
+		expect(
+			extractVerifyCommands(`bun test extension ${B}\n --coverage`),
+		).toEqual(["bun test extension  --coverage"]);
 	});
 });

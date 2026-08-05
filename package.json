@@ -13,7 +13,9 @@
     "url": "https://github.com/naxodev/pi-apnea/issues"
   },
   "type": "module",
-  "bin": { "apnea": "./dist/cli.js" },
+  "bin": {
+    "apnea": "./dist/cli.js"
+  },
   "engines": {
     "bun": ">=1.3.7"
   },
@@ -26,11 +28,23 @@
     "typecheck": "tsc --noEmit",
     "prepare": "bun run build"
   },
-  "keywords": ["pi-package", "pi", "herdr", "apnea", "workflow"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "herdr",
+    "apnea",
+    "workflow"
+  ],
   "pi": {
-    "skills": ["./skills"],
-    "prompts": ["./prompts"],
-    "extensions": ["./extension"]
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ],
+    "extensions": [
+      "./extension"
+    ]
   },
   "files": [
     "LICENSE",
@@ -45,6 +59,8 @@
     "skills",
     "prompts",
     "extension",
+    "!extension/**/*.test.ts",
+    "!extension/test",
     "herdr-plugin",
     "dist"
   ],

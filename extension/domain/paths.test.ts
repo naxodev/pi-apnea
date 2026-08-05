@@ -67,6 +67,26 @@ describe("packageRoot", () => {
 		return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 	}
 
+	// Returns null rather than guessing. The previous fallback handed back two
+	// levels up — precisely the wrong answer for the bundle and npm layouts this
+	// function exists to handle — and callers could not tell it from a real hit,
+	// so `start` stamped it into state.json and every dispatch of the run pointed
+	// briefs at a directory that does not exist.
+	test("returns null when no manifest with our name is above the start dir", () => {
+		const { dir, cleanup } = tree();
+		try {
+			const nested = path.join(dir, "somewhere", "deep");
+			fs.mkdirSync(nested, { recursive: true });
+			fs.writeFileSync(
+				path.join(dir, "package.json"),
+				JSON.stringify({ name: "not-us" }),
+			);
+			expect(findPackageRootFrom(nested)).toBeNull();
+		} finally {
+			cleanup();
+		}
+	});
+
 	test("resolves one level up from dist/, where the bundled CLI lives", () => {
 		const { dir, cleanup } = tree();
 		try {
