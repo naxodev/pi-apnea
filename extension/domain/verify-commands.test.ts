@@ -134,3 +134,50 @@ describe("extractVerifyCommands — line continuations", () => {
 		).toEqual(["bun test extension  --coverage"]);
 	});
 });
+
+describe("extractVerifyCommands — comments interleaved with continuations", () => {
+	// Both split orderings shipped bugs: join-then-strip let a trailing-backslash
+	// comment swallow the command below it; strip-then-join spliced the commands
+	// on either side of a removed comment line into one. bash interleaves, and
+	// every command later runs through `bash -lc`, so bash is the spec.
+	test("a comment between a continued line and the next command does not splice them", () => {
+		expect(
+			extractVerifyCommands(
+				fence(`test -f README.md ${B}\n# note about the check\nbun test extension`),
+			),
+		).toEqual(["test -f README.md", "bun test extension"]);
+	});
+
+	test("a comment with its own trailing backslash still ends the logical command", () => {
+		// bash discards a comment to the end of the logical line, backslash and
+		// all — the comment's continuation must not glue `next` onward.
+		expect(
+			extractVerifyCommands(
+				fence(`test -f a ${B}\n# note ${B}\nbun test extension`),
+			),
+		).toEqual(["test -f a", "bun test extension"]);
+	});
+
+	test("a joined '#' with no whitespace on either side is a word, not a comment", () => {
+		// `over\` + `#note` is the single word `over#note` in bash; terminating
+		// on it would split one command into two.
+		expect(extractVerifyCommands(fence(`test -f over${B}\n#note.md`))).toEqual([
+			"test -f over#note.md",
+		]);
+	});
+});
+
+describe("extractVerifyCommands — no-fence path and markdown hard breaks", () => {
+	// The no-fence text is markdown, not shell: a trailing backslash on a prose
+	// line is a hard break. Joining document-wide glued prose onto the command
+	// below it, the merged line stopped matching the command pattern, and the
+	// check was silently dropped — the gate committed the phase green having run
+	// a subset of its verify commands.
+	test("a prose hard break above a command does not swallow it", () => {
+		expect(
+			extractVerifyCommands(
+				`Some prose with a hard break ${B}\n$ bun test extension\n$ bunx tsc --noEmit`,
+			),
+		).toEqual(["bun test extension", "bunx tsc --noEmit"]);
+	});
+});

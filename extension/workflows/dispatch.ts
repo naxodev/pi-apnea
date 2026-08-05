@@ -123,6 +123,12 @@ function configWithTaskRef(e: ConfigError, ref: TaskRef): ConfigError {
 export const dispatchWorkflow = (
 	params: DispatchParams,
 	root: string,
+	// `packageRoot` override for tests. The real resolver reads the actual
+	// filesystem with node:fs — below the FileSystem service every other file
+	// access here goes through — so without this seam the stale-root tests had
+	// to seed the fake filesystem at a path derived from wherever the suite
+	// happened to run.
+	opts: { packageRoot?: () => string } = {},
 ): Effect.Effect<
 	ToolResult,
 	AppError,
@@ -277,33 +283,34 @@ export const dispatchWorkflow = (
 				break;
 		}
 
-		// clear-before-dispatch
-		yield* fs.mkdir(path.dirname(artifactAbs), { recursive: true });
-		if (yield* fs.exists(artifactAbs)) {
-			const backupMillis = yield* Clock.currentTimeMillis;
-			yield* fs.rename(artifactAbs, `${artifactAbs}.bak.${backupMillis}`);
-		}
-
-		const artifactRel = rel(artifactAbs, root);
-		// Prefer the live package root over the one frozen into state.json at
-		// `start`. A run started by a build with a wrong root — or before the
-		// package moved — keeps pointing every brief at a directory that does
-		// not exist, and the only symptom is a role sitting in a pane having
-		// been told to read a missing file. `state.package_root` stays as the
-		// fallback so a genuinely relocated checkout still resolves.
-		const livePackageRoot = packageRoot();
+		// Resolve the brief BEFORE clear-before-dispatch. This block can refuse,
+		// and the rename below is a mutation: refusing after it left the prior
+		// artifact stranded at a timestamped .bak path, so a failed dispatch
+		// quietly destroyed the artifact it was supposed to replace.
+		//
+		// The run's pinned root (stamped into state.json at `start`) comes
+		// FIRST. A run must keep the brief version it started with — the live
+		// install can be a newer checkout whose briefs describe a different
+		// artifact layout, and silently swapping mid-run points the role's
+		// instructions at one protocol while the run's gates expect another.
+		// The live root is strictly a repair path: it is consulted only when
+		// the pinned root has no brief at all, which is what a run stamped by
+		// the broken bundled resolver looks like.
+		const livePackageRoot = opts.packageRoot?.() ?? packageRoot();
 		const briefCandidates = [
-			path.join(livePackageRoot, "briefs", `${role}.md`),
-			path.join(state.package_root, "briefs", `${role}.md`),
+			...new Set([
+				path.join(state.package_root, "briefs", `${role}.md`),
+				path.join(livePackageRoot, "briefs", `${role}.md`),
+			]),
 		];
-		let briefAbs = briefCandidates[0]!;
+		let briefAbs: string | null = null;
 		for (const candidate of briefCandidates) {
 			if (yield* fs.exists(candidate)) {
 				briefAbs = candidate;
 				break;
 			}
 		}
-		if (!(yield* fs.exists(briefAbs))) {
+		if (briefAbs == null) {
 			// Refuse loudly here rather than launching a pane whose role will
 			// stall on a missing file with no diagnostic from apnea.
 			return yield* new GateRefused({
@@ -314,6 +321,15 @@ export const dispatchWorkflow = (
 				details: { role, tried: briefCandidates },
 			});
 		}
+
+		// clear-before-dispatch
+		yield* fs.mkdir(path.dirname(artifactAbs), { recursive: true });
+		if (yield* fs.exists(artifactAbs)) {
+			const backupMillis = yield* Clock.currentTimeMillis;
+			yield* fs.rename(artifactAbs, `${artifactAbs}.bak.${backupMillis}`);
+		}
+
+		const artifactRel = rel(artifactAbs, root);
 		const body = taskBody({
 			kind: params.kind,
 			role,
@@ -396,7 +412,11 @@ export const dispatchWorkflow = (
 			}
 			if (!(yield* herdr.hasApneaPlugin)) {
 				return yield* new HerdrError({
-					message: `apnea herdr plugin not linked. Run /apnea setup, or: herdr plugin link ${state.package_root}/herdr-plugin`,
+					// Live root, not `state.package_root`: the frozen value is the
+				// one this file just stopped trusting for briefs, and a stale
+				// one here tells the user to link a plugin directory that does
+				// not exist.
+				message: `apnea herdr plugin not linked. Run /apnea setup, or: herdr plugin link ${livePackageRoot}/herdr-plugin`,
 					details: { ...taskRef },
 				});
 			}

@@ -13,6 +13,7 @@ import { fakeVcsLayer } from "../test/fake-vcs.ts";
 import { itEffect } from "../test/it-effect.ts";
 import { RunStoreLive } from "../services/run-store.ts";
 import { Herdr } from "../services/herdr.ts";
+import { briefFiles } from "../test/briefs.ts";
 import { dispatchWorkflow } from "./dispatch.ts";
 import {
 	DEFAULT_BUDGET_MS,
@@ -56,19 +57,10 @@ function baseState(overrides: Partial<RunState> = {}): RunState {
 	};
 }
 
-// These tests drive `dispatch` before `wait`, and dispatch now refuses when the
-// role's brief is missing rather than launching a pane that will stall on it.
-const BRIEFS: Record<string, string> = Object.fromEntries(
-	["planner", "reviewer", "coder"].map((role) => [
-		`/pkg/briefs/${role}.md`,
-		`# ${role} brief\n`,
-	]),
-);
-
 function seedFs(state: RunState, files: Record<string, string> = {}) {
 	return makeFakeFileSystem({
 		[statePath(ROOT)]: `${JSON.stringify(state, null, 2)}\n`,
-		...BRIEFS,
+		...briefFiles("/pkg"),
 		...files,
 	});
 }

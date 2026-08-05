@@ -1,50 +1,54 @@
-/**
- * Drop whole-line `#` comments.
- *
- * Runs BEFORE continuations are joined, because a shell comment extends to the
- * end of its physical line: the `\` in `# note \` is inside the comment and
- * continues nothing. Joining first and filtering after merged the comment with
- * the command below it and then discarded both, so a fence whose first line was
- * a trailing-backslash comment lost its next command entirely — `bun test
- * extension` silently never ran and the phase committed green.
- */
-function stripComments(lines: string[]): string[] {
-	return lines.filter((line) => !line.trim().startsWith("#"));
+/** Does this line end in an ODD run of backslashes — a shell continuation? */
+function endsInContinuation(line: string): boolean {
+	const run = /(\\+)$/.exec(line);
+	return run !== null && run[1]!.length % 2 === 1;
 }
 
 /**
- * Join shell line-continuations, line by line.
+ * Split fence lines into logical shell commands: continuations joined,
+ * comments dropped — in ONE pass, because the two interact and both split
+ * orderings shipped bugs.
  *
- * A line ends in a continuation when it ends in an ODD run of backslashes; an
- * even run is escaped literals and ends the command. The final backslash is
- * removed and the next line is appended with NOTHING between them — that is
- * what a shell does, and it is the part the first version of this got wrong.
- * It substituted a single space, which corrupts two real cases:
+ * Join-then-strip (version 1): a comment ending in `\` swallowed the command
+ * below it, then the merged line was dropped as a comment — `bun test
+ * extension` silently never ran and the phase committed green.
  *
- *   test -f docs/over\ + view.md   -> `over view.md`, not `overview.md`
- *   grep -q 'foo \    + `   bar'`  -> the quoted pattern silently changes
+ * Strip-then-join (version 2): removing a comment line that sat BETWEEN a
+ * continued line and the next command spliced the two commands together —
+ * `test -f README.md \` + `# note` + `bun test extension` became one command.
  *
- * The second is the dangerous one: the gate greps a pattern nobody wrote and
- * can report a pass for a check that never held.
+ * bash resolves this by interleaving, and each command later runs through
+ * `bash -lc`, so bash's rules are the spec:
  *
- * The backslash must also be the LAST character. `echo hi \ ` with a trailing
- * space escapes the space and ends the command; treating it as a continuation
- * swallowed the following command as an argument, so the suite went unrun and
- * the gate passed.
+ * - Joining appends the next line with NOTHING between; the final backslash of
+ *   an odd run is dropped, the rest stay (they are escaped literals). A
+ *   backslash that is not the line's last character continues nothing —
+ *   `echo hi \ ` escapes the space and ends the command.
+ * - A `#` at the start of a logical command is a comment; its own trailing
+ *   backslash is inside the comment and continues nothing.
+ * - A comment line reached MID-continuation ends the logical command, when the
+ *   `#` would start a word in the joined text (whitespace before it). Without
+ *   whitespace on either side of the join, `over\` + `#note` is the single
+ *   word `over#note`, not a comment — so it is appended, not terminated on.
  */
-function joinContinuations(lines: string[]): string[] {
+function logicalCommands(lines: string[]): string[] {
 	const out: string[] = [];
 	let acc = "";
 	let pending = false;
 	for (const line of lines) {
-		const run = /(\\+)$/.exec(line);
-		const continues = run !== null && run[1]!.length % 2 === 1;
-		// Drop only the final backslash; an odd run longer than one leaves
-		// literal backslashes behind that the command still needs.
+		const isCommentish = line.trim().startsWith("#");
+		if (!pending && isCommentish) continue;
+		if (pending && isCommentish && (/\s$/.test(acc) || /^\s/.test(line))) {
+			out.push(acc);
+			acc = "";
+			pending = false;
+			continue;
+		}
+		const continues = endsInContinuation(line);
 		const text = continues ? line.slice(0, -1) : line;
 		acc = pending ? acc + text : text;
 		pending = continues;
-		if (!continues) {
+		if (!pending) {
 			out.push(acc);
 			acc = "";
 		}
@@ -57,7 +61,7 @@ function joinContinuations(lines: string[]): string[] {
 
 function toCommands(lines: string[]): string[] {
 	const cmds: string[] = [];
-	for (const joined of joinContinuations(stripComments(lines))) {
+	for (const joined of logicalCommands(lines)) {
 		const t = joined.trim();
 		if (t) cmds.push(t);
 	}
@@ -95,20 +99,30 @@ export function extractVerifyCommands(phasePackageText: string): string[] {
 		if (cmds.length) return cmds;
 	}
 
-	// Last resort: $ / test / bun lines.
+	// Last resort: $ / test / bun lines scattered through prose.
 	//
-	// Joined first, like both fence paths. This path was left splitting on raw
-	// newlines when continuations were introduced, so a package with no fence
-	// still dropped the continuation line and kept a dangling backslash — the
-	// original bug, still live in the one path nobody looked at.
+	// Continuations join FORWARD FROM A MATCHED COMMAND LINE only, never
+	// document-wide. This text is markdown, not shell, and a trailing backslash
+	// on a prose line is a markdown hard break: joining globally glued prose
+	// onto the command below it, the merged line no longer matched the command
+	// pattern, and the check was silently dropped — the gate ran a subset of
+	// the verify commands and committed the phase green. Comments need no
+	// handling here: a line starting with `#` cannot match the pattern.
 	const cmds: string[] = [];
-	for (const line of joinContinuations(
-		stripComments(phasePackageText.split(/\r?\n/)),
-	)) {
-		const m = line.match(
+	const rawLines = phasePackageText.split(/\r?\n/);
+	for (let i = 0; i < rawLines.length; i++) {
+		const m = rawLines[i]!.match(
 			/^\s*(?:\$\s+)?((?:test |node |npm |bun |bunx |chmod |head ).+)$/,
 		);
-		if (m) cmds.push(m[1]!.trim());
+		if (!m) continue;
+		let cmd = m[1]!;
+		while (endsInContinuation(cmd) && i + 1 < rawLines.length) {
+			cmd = cmd.slice(0, -1) + rawLines[++i]!;
+		}
+		// Dangling continuation on the final line: drop the backslash rather
+		// than handing the shell a command that continues into nothing.
+		if (endsInContinuation(cmd)) cmd = cmd.slice(0, -1);
+		cmds.push(cmd.trim());
 	}
 	return cmds;
 }
