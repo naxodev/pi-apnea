@@ -12,6 +12,7 @@ import { fakeHerdrLayer } from "../test/fake-herdr.ts";
 import { fakeVcsLayer } from "../test/fake-vcs.ts";
 import { itEffect } from "../test/it-effect.ts";
 import { RunStoreLive } from "../services/run-store.ts";
+import { briefFiles } from "../test/briefs.ts";
 import { dispatchWorkflow } from "./dispatch.ts";
 
 const ROOT = "/proj";
@@ -75,6 +76,7 @@ function baseState(overrides: Partial<RunState> = {}): RunState {
 function seedFs(state: RunState, files: Record<string, string> = {}) {
 	return makeFakeFileSystem({
 		[statePath(ROOT)]: `${JSON.stringify(state, null, 2)}\n`,
+		...briefFiles("/pkg"),
 		...files,
 	});
 }
@@ -395,15 +397,26 @@ describe("dispatchWorkflow (fake layers)", () => {
 	);
 
 	itEffect("floating with plugin missing → HerdrError", () => {
-		const fsFake = seedFs(baseState({ step: "planning" }));
+		// state.package_root deliberately differs from the injected live root:
+		// the suggested `herdr plugin link` command must name the LIVE package
+		// root. Interpolating the frozen state value told users hit by the
+		// stale-root bug to link a plugin directory that does not exist.
+		const fsFake = seedFs(baseState({ step: "planning", package_root: "/stale" }), {
+			...briefFiles("/live-pkg"),
+		});
 		const { layer, fakeFs } = layerOf(fsFake, {
 			herdr: { enabled: true, version: [0, 7, 4], hasPlugin: false },
 			cfg: FLOATING_CFG,
 		});
 		return Effect.gen(function* () {
-			const r = yield* Effect.result(dispatchWorkflow({ kind: "plan" }, ROOT));
+			const r = yield* Effect.result(
+				dispatchWorkflow({ kind: "plan" }, ROOT, {
+					packageRoot: () => "/live-pkg",
+				}),
+			);
 			const e = expectFailure(r, "HerdrError");
 			expect(e.message).toContain("apnea herdr plugin not linked");
+			expect(e.message).toContain("herdr plugin link /live-pkg/herdr-plugin");
 			assertTaskRef(e.details, fakeFs);
 
 			const out = toToolResult(e);
@@ -705,5 +718,107 @@ describe("dispatchWorkflow (fake layers)", () => {
 		expect(state.pending_deadline_ms! - state.pending_started_at!).toBe(
 			1_500_000,
 		);
+	});
+});
+
+describe("dispatchWorkflow — brief resolution", () => {
+	// The packageRoot fix only reaches NEW runs: `start` freezes the value into
+	// state.json, so a run begun by a build with the wrong root keeps pointing
+	// every brief at the repo's parent even after upgrading. The live root is
+	// the repair path when the pinned one has no brief at all.
+	itEffect("falls forward to the live package root when the pinned one has no briefs", () => {
+		const state = baseState({
+			step: "planning",
+			package_root: "/stale/parent/dir",
+		});
+		const fsFake = makeFakeFileSystem({
+			[statePath(ROOT)]: `${JSON.stringify(state, null, 2)}\n`,
+			// Briefs exist ONLY under the live root, never under the stale one.
+			...briefFiles("/live-pkg"),
+		});
+		const { layer } = layerOf(fsFake, { herdr: { enabled: false } });
+		return Effect.gen(function* () {
+			const r = yield* dispatchWorkflow({ kind: "plan" }, ROOT, {
+				packageRoot: () => "/live-pkg",
+			});
+			expect(r.ok).toBe(true);
+		}).pipe(Effect.provide(layer));
+	});
+
+	// The repair must stay a repair. When BOTH roots hold a brief, the run's
+	// pinned root wins: the live install can be a different apnea version whose
+	// briefs describe a different artifact layout, and silently swapping
+	// mid-run points the role at one protocol while the run's gates expect
+	// another. A run keeps the briefs it started with.
+	itEffect("prefers the run's pinned briefs when both roots have them", () => {
+		const state = baseState({ step: "planning", package_root: "/pinned" });
+		const fsFake = makeFakeFileSystem({
+			[statePath(ROOT)]: `${JSON.stringify(state, null, 2)}\n`,
+			...briefFiles("/pinned"),
+			...briefFiles("/live-pkg"),
+		});
+		const { layer, fakeFs } = layerOf(fsFake, { herdr: { enabled: false } });
+		return Effect.gen(function* () {
+			const r = yield* dispatchWorkflow({ kind: "plan" }, ROOT, {
+				packageRoot: () => "/live-pkg",
+			});
+			expect(r.ok).toBe(true);
+			// The task file names the brief the role must read.
+			const taskFile = [...fakeFs.files.keys()].find((k) =>
+				k.includes("/.apnea/tasks/"),
+			)!;
+			expect(fakeFs.files.get(taskFile)).toContain("/pinned/briefs/planner.md");
+			expect(fakeFs.files.get(taskFile)).not.toContain("/live-pkg");
+		}).pipe(Effect.provide(layer));
+	});
+
+	// A refusal must not mutate. The brief check originally ran AFTER
+	// clear-before-dispatch, so refusing had already renamed the existing
+	// artifact to a timestamped .bak — status and wait then saw no artifact,
+	// and the content was recoverable only by finding the backup by hand.
+	itEffect("a missing-brief refusal leaves the existing artifact untouched", () => {
+		const state = baseState({ step: "planning" });
+		const planAbs = `${ROOT}/.apnea/artifacts/plan.md`;
+		const fsFake = makeFakeFileSystem({
+			[statePath(ROOT)]: `${JSON.stringify(state, null, 2)}\n`,
+			[planAbs]: "---\nstatus: done\n---\nprior plan\n",
+			// deliberately no briefs anywhere
+		});
+		const { layer, fakeFs } = layerOf(fsFake, { herdr: { enabled: false } });
+		return Effect.gen(function* () {
+			const r = yield* Effect.result(
+				dispatchWorkflow({ kind: "plan" }, ROOT, { packageRoot: () => "/live-pkg" }),
+			);
+			expectFailure(r, "GateRefused");
+			expect(fakeFs.files.get(planAbs)).toContain("prior plan");
+			expect(
+				[...fakeFs.files.keys()].some((k) => k.includes("plan.md.bak.")),
+			).toBe(false);
+		}).pipe(Effect.provide(layer));
+	});
+
+	// A pane launched with a prompt pointing at a brief that is not there does
+	// not fail: the role simply sits in the pane, and apnea reports a healthy
+	// dispatch. Refuse before launching, and name what was tried — each
+	// location ONCE. When the pinned and live roots are equal the candidate
+	// list must collapse, or the message claims two locations were tried when
+	// only one was.
+	itEffect("refuses instead of launching, naming each tried path once", () => {
+		const state = baseState({ step: "planning", package_root: "/pkg" });
+		const fsFake = makeFakeFileSystem({
+			[statePath(ROOT)]: `${JSON.stringify(state, null, 2)}\n`,
+			// deliberately no briefs/
+		});
+		const { layer } = layerOf(fsFake, { herdr: { enabled: false } });
+		return Effect.gen(function* () {
+			const r = yield* Effect.result(
+				dispatchWorkflow({ kind: "plan" }, ROOT, { packageRoot: () => "/pkg" }),
+			);
+			const e = expectFailure(r, "GateRefused");
+			const msg = toToolResult(e).error!;
+			expect(msg).toContain("no brief for role");
+			expect(msg.split("/pkg/briefs/planner.md").length - 1).toBe(1);
+			expect(msg).not.toContain(" and ");
+		}).pipe(Effect.provide(layer));
 	});
 });

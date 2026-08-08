@@ -13,6 +13,7 @@ import { fakeVcsLayer } from "../test/fake-vcs.ts";
 import { itEffect } from "../test/it-effect.ts";
 import { RunStoreLive } from "../services/run-store.ts";
 import { Herdr } from "../services/herdr.ts";
+import { briefFiles } from "../test/briefs.ts";
 import { dispatchWorkflow } from "./dispatch.ts";
 import {
 	DEFAULT_BUDGET_MS,
@@ -59,6 +60,7 @@ function baseState(overrides: Partial<RunState> = {}): RunState {
 function seedFs(state: RunState, files: Record<string, string> = {}) {
 	return makeFakeFileSystem({
 		[statePath(ROOT)]: `${JSON.stringify(state, null, 2)}\n`,
+		...briefFiles("/pkg"),
 		...files,
 	});
 }

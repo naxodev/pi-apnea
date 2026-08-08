@@ -3,6 +3,7 @@ import { Clock, Effect, Result } from "effect";
 import { effectivePaneStyle, supportsFloating } from "../domain/herdr.ts";
 import {
 	abs,
+	packageRoot,
 	phaseDir,
 	planPath,
 	planReviewPath,
@@ -122,6 +123,12 @@ function configWithTaskRef(e: ConfigError, ref: TaskRef): ConfigError {
 export const dispatchWorkflow = (
 	params: DispatchParams,
 	root: string,
+	// `packageRoot` override for tests. The real resolver reads the actual
+	// filesystem with node:fs — below the FileSystem service every other file
+	// access here goes through — so without this seam the stale-root tests had
+	// to seed the fake filesystem at a path derived from wherever the suite
+	// happened to run.
+	opts: { packageRoot?: () => string } = {},
 ): Effect.Effect<
 	ToolResult,
 	AppError,
@@ -276,6 +283,45 @@ export const dispatchWorkflow = (
 				break;
 		}
 
+		// Resolve the brief BEFORE clear-before-dispatch. This block can refuse,
+		// and the rename below is a mutation: refusing after it left the prior
+		// artifact stranded at a timestamped .bak path, so a failed dispatch
+		// quietly destroyed the artifact it was supposed to replace.
+		//
+		// The run's pinned root (stamped into state.json at `start`) comes
+		// FIRST. A run must keep the brief version it started with — the live
+		// install can be a newer checkout whose briefs describe a different
+		// artifact layout, and silently swapping mid-run points the role's
+		// instructions at one protocol while the run's gates expect another.
+		// The live root is strictly a repair path: it is consulted only when
+		// the pinned root has no brief at all, which is what a run stamped by
+		// the broken bundled resolver looks like.
+		const livePackageRoot = opts.packageRoot?.() ?? packageRoot();
+		const briefCandidates = [
+			...new Set([
+				path.join(state.package_root, "briefs", `${role}.md`),
+				path.join(livePackageRoot, "briefs", `${role}.md`),
+			]),
+		];
+		let briefAbs: string | null = null;
+		for (const candidate of briefCandidates) {
+			if (yield* fs.exists(candidate)) {
+				briefAbs = candidate;
+				break;
+			}
+		}
+		if (briefAbs == null) {
+			// Refuse loudly here rather than launching a pane whose role will
+			// stall on a missing file with no diagnostic from apnea.
+			return yield* new GateRefused({
+				gate: "brief",
+				message:
+					`no brief for role "${role}". Looked in ${briefCandidates.join(" and ")}. ` +
+					`The package root could not be resolved — reinstall @naxodev/apnea, or start a fresh run if this one predates a move.`,
+				details: { role, tried: briefCandidates },
+			});
+		}
+
 		// clear-before-dispatch
 		yield* fs.mkdir(path.dirname(artifactAbs), { recursive: true });
 		if (yield* fs.exists(artifactAbs)) {
@@ -284,7 +330,6 @@ export const dispatchWorkflow = (
 		}
 
 		const artifactRel = rel(artifactAbs, root);
-		const briefAbs = path.join(state.package_root, "briefs", `${role}.md`);
 		const body = taskBody({
 			kind: params.kind,
 			role,
@@ -367,7 +412,11 @@ export const dispatchWorkflow = (
 			}
 			if (!(yield* herdr.hasApneaPlugin)) {
 				return yield* new HerdrError({
-					message: `apnea herdr plugin not linked. Run /apnea setup, or: herdr plugin link ${state.package_root}/herdr-plugin`,
+					// Live root, not `state.package_root`: the frozen value is the
+				// one this file just stopped trusting for briefs, and a stale
+				// one here tells the user to link a plugin directory that does
+				// not exist.
+				message: `apnea herdr plugin not linked. Run /apnea setup, or: herdr plugin link ${livePackageRoot}/herdr-plugin`,
 					details: { ...taskRef },
 				});
 			}
